@@ -1,5 +1,5 @@
 // This package provides concrete implementations of the store/v2 "MultiStore" types, including
-// CommitMultiStore, CacheMultiStore, and BasicMultiStore (as read-only stores at past versions).
+// CommitMultiStore, CacheMultiStore, and MultiStore (as read-only stores at past versions).
 //
 // Substores are declared as part of a schema within StoreOptions.
 // The schema cannot be changed once a CommitMultiStore is initialized, and changes to the schema must be done
@@ -16,4 +16,4 @@
 // of a key's (non)existence within the substore SMT, and a proof of the substore's existence within the
 // MultiStore (using the Merkle map proof spec (TendermintSpec)).
 
-package root
+package multi

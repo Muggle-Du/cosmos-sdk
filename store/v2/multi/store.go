@@ -1,4 +1,4 @@
-package root
+package multi
 
 import (
 	"errors"
@@ -13,6 +13,7 @@ import (
 	dbm "github.com/cosmos/cosmos-sdk/db"
 	prefixdb "github.com/cosmos/cosmos-sdk/db/prefix"
 	util "github.com/cosmos/cosmos-sdk/internal"
+	snapshottypes "github.com/cosmos/cosmos-sdk/snapshots/types"
 	sdkmaps "github.com/cosmos/cosmos-sdk/store/internal/maps"
 	"github.com/cosmos/cosmos-sdk/store/listenkv"
 	"github.com/cosmos/cosmos-sdk/store/prefix"
@@ -23,17 +24,21 @@ import (
 	"github.com/cosmos/cosmos-sdk/store/v2/transient"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/types/kv"
+	protoio "github.com/gogo/protobuf/io"
 )
 
 var (
 	_ types.Queryable        = (*Store)(nil)
 	_ types.CommitMultiStore = (*Store)(nil)
 	_ types.CacheMultiStore  = (*cacheStore)(nil)
-	_ types.BasicMultiStore  = (*viewStore)(nil)
+	_ types.MultiStore       = (*viewStore)(nil)
 	_ types.KVStore          = (*substore)(nil)
 )
 
 var (
+	ErrVersionDoesNotExist = errors.New("version does not exist")
+	ErrMaximumHeight       = errors.New("maximum block height reached")
+
 	// Root prefixes
 	merkleRootKey = []byte{0} // Key for root hash of namespace tree
 	schemaPrefix  = []byte{1} // Prefix for store keys (namespaces)
@@ -43,40 +48,43 @@ var (
 	substoreMerkleRootKey = []byte{0} // Key for root hashes of Merkle trees
 	dataPrefix            = []byte{1} // Prefix for state mappings
 	indexPrefix           = []byte{2} // Prefix for Store reverse index
-	merkleNodePrefix      = []byte{3} // Prefix for Merkle tree nodes
-	merkleValuePrefix     = []byte{4} // Prefix for Merkle value mappings
-
-	ErrVersionDoesNotExist = errors.New("version does not exist")
-	ErrMaximumHeight       = errors.New("maximum block height reached")
+	smtPrefix             = []byte{3} // Prefix for SMT data
 )
 
-func ErrStoreNotFound(skey string) error {
-	return fmt.Errorf("store does not exist for key: %s", skey)
+func ErrStoreNotFound(key string) error {
+	return fmt.Errorf("store does not exist for key: %s", key)
 }
 
-// StoreConfig is used to define a schema and other options and pass them to the MultiStore constructor.
-type StoreConfig struct {
+// StoreParams is used to define a schema and other options and pass them to the MultiStore constructor.
+type StoreParams struct {
 	// Version pruning options for backing DBs.
 	Pruning types.PruningOptions
 	// The minimum allowed version number.
 	InitialVersion uint64
-	// The backing DB to use for the state commitment Merkle tree data.
+	// The optional backing DB to use for the state commitment Merkle tree data.
 	// If nil, Merkle data is stored in the state storage DB under a separate prefix.
 	StateCommitmentDB dbm.DBConnection
-
-	prefixRegistry
+	// Contains the store schema and methods to modify it
+	SchemaBuilder
+	storeKeys
+	// Inter-block persistent cache to use. TODO: not implemented
 	PersistentCache types.MultiStorePersistentCache
-	Upgrades        []types.StoreUpgrades
-
+	// Any pending upgrades to apply on loading.
+	Upgrades *types.StoreUpgrades
+	// Contains The trace context and listeners that can also be set from store methods.
 	*traceListenMixin
 }
 
 // StoreSchema defineds a mapping of substore keys to store types
 type StoreSchema map[string]types.StoreType
+type StoreKeySchema map[types.StoreKey]types.StoreType
+
+// storeKeys maps key names to StoreKey instances
+type storeKeys map[string]types.StoreKey
 
 // Store is the main persistent store type implementing CommitMultiStore.
 // Substores consist of an SMT-based state commitment store and state storage.
-// Substores must be reserved in the StoreConfig or defined as part of a StoreUpgrade in order to be valid.
+// Substores must be reserved in the StoreParams or defined as part of a StoreUpgrade in order to be valid.
 // Note:
 // The state commitment data and proof are structured in the same basic pattern as the MultiStore, but use an SMT rather than IAVL tree:
 // * The state commitment store of each substore consists of a independent SMT.
@@ -87,14 +95,15 @@ type Store struct {
 	StateCommitmentDB  dbm.DBConnection
 	stateCommitmentTxn dbm.DBReadWriter
 
-	schema StoreSchema
-	mem    *mem.Store
-	tran   *transient.Store
-	mtx    sync.RWMutex
+	schema StoreKeySchema
 
-	// Copied from StoreConfig
+	mem  *mem.Store
+	tran *transient.Store
+	mtx  sync.RWMutex
+
+	// Copied from StoreParams
 	Pruning        types.PruningOptions
-	InitialVersion uint64 // if
+	InitialVersion uint64
 	*traceListenMixin
 
 	PersistentCache types.MultiStorePersistentCache
@@ -109,54 +118,54 @@ type substore struct {
 	stateCommitmentStore *smt.Store
 }
 
-// Branched state
-type cacheStore struct {
-	source    types.BasicMultiStore
-	substores map[string]types.CacheKVStore
-	*traceListenMixin
-}
-
-// Read-only store for querying past versions
-type viewStore struct {
-	stateView           dbm.DBReader
-	stateCommitmentView dbm.DBReader
-	substoreCache       map[string]*viewSubstore
-	schema              StoreSchema
-}
-
-type viewSubstore struct {
-	dataBucket           dbm.DBReader
-	indexBucket          dbm.DBReader
-	stateCommitmentStore *smt.Store
-}
-
 // Builder type used to create a valid schema with no prefix conflicts
-type prefixRegistry struct {
+type SchemaBuilder struct {
 	StoreSchema
 	reserved []string
 }
 
 // Mixin type that to compose trace & listen state into each root store variant type
 type traceListenMixin struct {
-	listeners    map[string][]types.WriteListener
-	TraceWriter  io.Writer
-	TraceContext types.TraceContext
+	listeners         map[types.StoreKey][]types.WriteListener
+	TraceWriter       io.Writer
+	TraceContext      types.TraceContext
+	traceContextMutex sync.RWMutex
 }
 
 func newTraceListenMixin() *traceListenMixin {
-	return &traceListenMixin{listeners: map[string][]types.WriteListener{}}
+	return &traceListenMixin{listeners: map[types.StoreKey][]types.WriteListener{}}
 }
 
-// DefaultStoreConfig returns a MultiStore config with an empty schema, a single backing DB,
+func newSchemaBuilder() SchemaBuilder {
+	return SchemaBuilder{StoreSchema: StoreSchema{}}
+}
+
+// DefaultStoreParams returns a MultiStore config with an empty schema, a single backing DB,
 // pruning with PruneDefault, no listeners and no tracer.
-func DefaultStoreConfig() StoreConfig {
-	return StoreConfig{
-		Pruning: types.PruneDefault,
-		prefixRegistry: prefixRegistry{
-			StoreSchema: StoreSchema{},
-		},
+func DefaultStoreParams() StoreParams {
+	return StoreParams{
+		Pruning:          types.PruneDefault,
+		SchemaBuilder:    newSchemaBuilder(),
+		storeKeys:        storeKeys{},
 		traceListenMixin: newTraceListenMixin(),
 	}
+}
+
+// func (pr *SchemaBuilder) registerName(key string, typ types.StoreType) error {
+func (par *StoreParams) RegisterSubstore(skey types.StoreKey, typ types.StoreType) error {
+	if err := par.registerName(skey.Name(), typ); err != nil {
+		return err
+	}
+	par.storeKeys[skey.Name()] = skey
+	return nil
+}
+
+func (par *StoreParams) storeKey(key string) (types.StoreKey, error) {
+	skey, ok := par.storeKeys[key]
+	if !ok {
+		return nil, fmt.Errorf("StoreKey instance not mapped: %s", key)
+	}
+	return skey, nil
 }
 
 // Returns true for valid store types for a MultiStore schema
@@ -191,8 +200,8 @@ func (this StoreSchema) equal(that StoreSchema) bool {
 }
 
 // Parses a schema from the DB
-func readSavedSchema(bucket dbm.DBReader) (*prefixRegistry, error) {
-	ret := prefixRegistry{StoreSchema: StoreSchema{}}
+func readSavedSchema(bucket dbm.DBReader) (*SchemaBuilder, error) {
+	ret := newSchemaBuilder()
 	it, err := bucket.Iterator(nil, nil)
 	if err != nil {
 		return nil, err
@@ -213,7 +222,7 @@ func readSavedSchema(bucket dbm.DBReader) (*prefixRegistry, error) {
 
 // NewStore constructs a MultiStore directly from a database.
 // Creates a new store if no data exists; otherwise loads existing data.
-func NewStore(db dbm.DBConnection, opts StoreConfig) (ret *Store, err error) {
+func NewStore(db dbm.DBConnection, opts StoreParams) (ret *Store, err error) {
 	versions, err := db.Versions()
 	if err != nil {
 		return
@@ -282,58 +291,73 @@ func NewStore(db dbm.DBConnection, opts StoreConfig) (ret *Store, err error) {
 			err = util.CombineErrors(err, ret.Close(), "base.Close also failed")
 		}
 	}()
+	writeSchema := func(sch StoreSchema) {
+		schemaWriter := prefixdb.NewPrefixWriter(ret.stateTxn, schemaPrefix)
+		var it dbm.Iterator
+		it, err = schemaView.Iterator(nil, nil)
+		if err != nil {
+			return
+		}
+		for it.Next() {
+			err = schemaWriter.Delete(it.Key())
+			if err != nil {
+				return
+			}
+		}
+		err = it.Close()
+		if err != nil {
+			return
+		}
+		err = schemaView.Discard()
+		if err != nil {
+			return
+		}
+		// NB. the migrated contents and schema are not committed until the next store.Commit
+		for skey, typ := range sch {
+			err = schemaWriter.Set([]byte(skey), []byte{byte(typ)})
+			if err != nil {
+				return
+			}
+		}
+	}
+
 	reg, err := readSavedSchema(schemaView)
 	if err != nil {
 		return
 	}
 	// If the loaded schema is empty (for new store), just copy the config schema;
-	// Otherwise, verify it is identical to the config schema
+	// Otherwise, migrate, then verify it is identical to the config schema
 	if len(reg.StoreSchema) == 0 {
-		for k, v := range opts.StoreSchema {
-			reg.StoreSchema[k] = v
-		}
-		reg.reserved = make([]string, len(opts.reserved))
-		copy(reg.reserved, opts.reserved)
+		writeSchema(opts.StoreSchema)
 	} else {
+		// Apply migrations to the schema
+		if opts.Upgrades != nil {
+			err = reg.migrateSchema(*opts.Upgrades)
+			if err != nil {
+				return
+			}
+		}
 		if !reg.equal(opts.StoreSchema) {
 			err = errors.New("loaded schema does not match configured schema")
 			return
 		}
+		if opts.Upgrades != nil {
+			err = migrateData(ret, *opts.Upgrades)
+			if err != nil {
+				return
+			}
+			writeSchema(opts.StoreSchema)
+		}
 	}
-	// Apply migrations, then clear old schema and write the new one
-	for _, upgrades := range opts.Upgrades {
-		err = reg.migrate(ret, upgrades)
+	ret.schema = StoreKeySchema{}
+	for key, typ := range opts.StoreSchema {
+		var skey types.StoreKey
+		skey, err = opts.storeKey(key)
 		if err != nil {
 			return
 		}
+		ret.schema[skey] = typ
 	}
-	schemaWriter := prefixdb.NewPrefixWriter(ret.stateTxn, schemaPrefix)
-	it, err := schemaView.Iterator(nil, nil)
-	if err != nil {
-		return
-	}
-	for it.Next() {
-		err = schemaWriter.Delete(it.Key())
-		if err != nil {
-			return
-		}
-	}
-	err = it.Close()
-	if err != nil {
-		return
-	}
-	err = schemaView.Discard()
-	if err != nil {
-		return
-	}
-	// NB. the migrated contents and schema are not committed until the next store.Commit
-	for skey, typ := range reg.StoreSchema {
-		err = schemaWriter.Set([]byte(skey), []byte{byte(typ)})
-		if err != nil {
-			return
-		}
-	}
-	ret.schema = reg.StoreSchema
 	return
 }
 
@@ -346,7 +370,7 @@ func (s *Store) Close() error {
 }
 
 // Applies store upgrades to the DB contents.
-func (pr *prefixRegistry) migrate(store *Store, upgrades types.StoreUpgrades) error {
+func migrateData(store *Store, upgrades types.StoreUpgrades) error {
 	// Get a view of current state to allow mutation while iterating
 	reader := store.stateDB.Reader()
 	scReader := reader
@@ -355,16 +379,6 @@ func (pr *prefixRegistry) migrate(store *Store, upgrades types.StoreUpgrades) er
 	}
 
 	for _, key := range upgrades.Deleted {
-		sst, ix, err := pr.storeInfo(key)
-		if err != nil {
-			return err
-		}
-		if sst != types.StoreTypePersistent {
-			return fmt.Errorf("prefix is for non-persistent substore: %v (%v)", key, sst)
-		}
-		pr.reserved = append(pr.reserved[:ix], pr.reserved[ix+1:]...)
-		delete(pr.StoreSchema, key)
-
 		pfx := substorePrefix(key)
 		subReader := prefixdb.NewPrefixReader(reader, pfx)
 		it, err := subReader.Iterator(nil, nil)
@@ -388,20 +402,6 @@ func (pr *prefixRegistry) migrate(store *Store, upgrades types.StoreUpgrades) er
 		}
 	}
 	for _, rename := range upgrades.Renamed {
-		sst, ix, err := pr.storeInfo(rename.OldKey)
-		if err != nil {
-			return err
-		}
-		if sst != types.StoreTypePersistent {
-			return fmt.Errorf("prefix is for non-persistent substore: %v (%v)", rename.OldKey, sst)
-		}
-		pr.reserved = append(pr.reserved[:ix], pr.reserved[ix+1:]...)
-		delete(pr.StoreSchema, rename.OldKey)
-		err = pr.RegisterSubstore(rename.NewKey, types.StoreTypePersistent)
-		if err != nil {
-			return err
-		}
-
 		oldPrefix := substorePrefix(rename.OldKey)
 		newPrefix := substorePrefix(rename.NewKey)
 		subReader := prefixdb.NewPrefixReader(reader, oldPrefix)
@@ -427,13 +427,6 @@ func (pr *prefixRegistry) migrate(store *Store, upgrades types.StoreUpgrades) er
 			it.Close()
 		}
 	}
-
-	for _, key := range upgrades.Added {
-		err := pr.RegisterSubstore(key, types.StoreTypePersistent)
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -441,11 +434,11 @@ func substorePrefix(key string) []byte {
 	return append(contentPrefix, key...)
 }
 
-// GetKVStore implements BasicMultiStore.
+// GetKVStore implements MultiStore.
 func (rs *Store) GetKVStore(skey types.StoreKey) types.KVStore {
 	key := skey.Name()
 	var parent types.KVStore
-	typ, has := rs.schema[key]
+	typ, has := rs.schema[skey]
 	if !has {
 		panic(ErrStoreNotFound(key))
 	}
@@ -492,9 +485,8 @@ func (rs *Store) getSubstore(key string) (*substore, error) {
 	if rootHash != nil {
 		stateCommitmentStore = loadSMT(stateCommitmentRW, rootHash)
 	} else {
-		merkleNodes := prefixdb.NewPrefixReadWriter(stateCommitmentRW, merkleNodePrefix)
-		merkleValues := prefixdb.NewPrefixReadWriter(stateCommitmentRW, merkleValuePrefix)
-		stateCommitmentStore = smt.NewStore(merkleNodes, merkleValues)
+		smtdb := prefixdb.NewPrefixReadWriter(stateCommitmentRW, smtPrefix)
+		stateCommitmentStore = smt.NewStore(smtdb)
 	}
 
 	return &substore{
@@ -521,35 +513,40 @@ func (s *Store) Commit() types.CommitID {
 	// Substores read-lock this mutex; lock to prevent racey invalidation of underlying txns
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+
 	// Determine the target version
 	versions, err := s.stateDB.Versions()
 	if err != nil {
 		panic(err)
 	}
+
 	target := versions.Last() + 1
 	if target > math.MaxInt64 {
 		panic(ErrMaximumHeight)
 	}
+
 	// Fast forward to initial version if needed
 	if s.InitialVersion != 0 && target < s.InitialVersion {
 		target = s.InitialVersion
 	}
+
 	cid, err := s.commit(target)
 	if err != nil {
 		panic(err)
 	}
+
 	// Prune if necessary
 	previous := cid.Version - 1
-	if s.Pruning.KeepEvery != 1 && s.Pruning.Interval != 0 && cid.Version%int64(s.Pruning.Interval) == 0 {
+	if s.Pruning.Interval != 0 && cid.Version%int64(s.Pruning.Interval) == 0 {
 		// The range of newly prunable versions
 		lastPrunable := previous - int64(s.Pruning.KeepRecent)
 		firstPrunable := lastPrunable - int64(s.Pruning.Interval)
+
 		for version := firstPrunable; version <= lastPrunable; version++ {
-			if s.Pruning.KeepEvery == 0 || version%int64(s.Pruning.KeepEvery) != 0 {
-				s.stateDB.DeleteVersion(uint64(version))
-				if s.StateCommitmentDB != nil {
-					s.StateCommitmentDB.DeleteVersion(uint64(version))
-				}
+			s.stateDB.DeleteVersion(uint64(version))
+
+			if s.StateCommitmentDB != nil {
+				s.StateCommitmentDB.DeleteVersion(uint64(version))
 			}
 		}
 	}
@@ -561,14 +558,14 @@ func (s *Store) Commit() types.CommitID {
 func (s *Store) getMerkleRoots() (ret map[string][]byte, err error) {
 	ret = map[string][]byte{}
 	for key := range s.schema {
-		sub, has := s.substoreCache[key]
+		sub, has := s.substoreCache[key.Name()]
 		if !has {
-			sub, err = s.getSubstore(key)
+			sub, err = s.getSubstore(key.Name())
 			if err != nil {
 				return
 			}
 		}
-		ret[key] = sub.stateCommitmentStore.Root()
+		ret[key.Name()] = sub.stateCommitmentStore.Root()
 	}
 	return
 }
@@ -675,17 +672,27 @@ func (rs *Store) SetInitialVersion(version uint64) error {
 }
 
 // GetVersion implements CommitMultiStore.
-func (rs *Store) GetVersion(version int64) (types.BasicMultiStore, error) {
+func (rs *Store) GetVersion(version int64) (types.MultiStore, error) {
 	return rs.getView(version)
 }
 
-// CacheMultiStore implements BasicMultiStore.
-func (rs *Store) CacheMultiStore() types.CacheMultiStore {
-	return &cacheStore{
-		source:           rs,
-		substores:        map[string]types.CacheKVStore{},
-		traceListenMixin: newTraceListenMixin(),
+// CacheWrap implements MultiStore.
+func (rs *Store) CacheWrap() types.CacheMultiStore {
+	return newCacheStore(rs)
+}
+
+// GetAllVersions implements CommitMultiStore.
+// https://github.com/cosmos/cosmos-sdk/pull/11124
+func (rs *Store) GetAllVersions() []int {
+	vs, err := rs.stateDB.Versions()
+	if err != nil {
+		panic(err)
 	}
+	var ret []int
+	for it := vs.Iterator(); it.Next(); {
+		ret = append(ret, int(it.Value()))
+	}
+	return ret
 }
 
 // parsePath expects a format like /<storeName>[/<subpath>]
@@ -749,9 +756,6 @@ func (rs *Store) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 		return sdkerrors.QueryResult(sdkerrors.Wrapf(err, "failed to access height"), false)
 	}
 
-	if _, has := rs.schema[storeName]; !has {
-		return sdkerrors.QueryResult(sdkerrors.Wrapf(sdkerrors.ErrUnknownRequest, "no such store: %s", storeName), false)
-	}
 	substore, err := view.getSubstore(storeName)
 	if err != nil {
 		return sdkerrors.QueryResult(sdkerrors.Wrapf(err, "failed to access store: %s", storeName), false)
@@ -766,7 +770,7 @@ func (rs *Store) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 			break
 		}
 		// TODO: actual IBC compatible proof. This is a placeholder so unit tests can pass
-		res.ProofOps, err = substore.stateCommitmentStore.GetProof([]byte(storeName + string(res.Key)))
+		res.ProofOps, err = substore.GetProof(res.Key)
 		if err != nil {
 			return sdkerrors.QueryResult(fmt.Errorf("Merkle proof creation failed for key: %v", res.Key), false) //nolint: stylecheck // proper name
 		}
@@ -801,9 +805,8 @@ func (rs *Store) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 }
 
 func loadSMT(stateCommitmentTxn dbm.DBReadWriter, root []byte) *smt.Store {
-	merkleNodes := prefixdb.NewPrefixReadWriter(stateCommitmentTxn, merkleNodePrefix)
-	merkleValues := prefixdb.NewPrefixReadWriter(stateCommitmentTxn, merkleValuePrefix)
-	return smt.LoadStore(merkleNodes, merkleValues, root)
+	smtdb := prefixdb.NewPrefixReadWriter(stateCommitmentTxn, smtPrefix)
+	return smt.LoadStore(smtdb, root)
 }
 
 // Returns closest index and whether it's a match
@@ -824,7 +827,44 @@ func binarySearch(hay []string, ndl string) (int, bool) {
 	return from, false
 }
 
-func (pr *prefixRegistry) storeInfo(key string) (sst types.StoreType, ix int, err error) {
+// Migrates the state of the registry based on the upgrades
+func (pr *SchemaBuilder) migrateSchema(upgrades types.StoreUpgrades) error {
+	for _, key := range upgrades.Deleted {
+		sst, ix, err := pr.storeInfo(key)
+		if err != nil {
+			return err
+		}
+		if sst != types.StoreTypePersistent {
+			return fmt.Errorf("prefix is for non-persistent substore: %v (%v)", key, sst)
+		}
+		pr.reserved = append(pr.reserved[:ix], pr.reserved[ix+1:]...)
+		delete(pr.StoreSchema, key)
+	}
+	for _, rename := range upgrades.Renamed {
+		sst, ix, err := pr.storeInfo(rename.OldKey)
+		if err != nil {
+			return err
+		}
+		if sst != types.StoreTypePersistent {
+			return fmt.Errorf("prefix is for non-persistent substore: %v (%v)", rename.OldKey, sst)
+		}
+		pr.reserved = append(pr.reserved[:ix], pr.reserved[ix+1:]...)
+		delete(pr.StoreSchema, rename.OldKey)
+		err = pr.registerName(rename.NewKey, types.StoreTypePersistent)
+		if err != nil {
+			return err
+		}
+	}
+	for _, key := range upgrades.Added {
+		err := pr.registerName(key, types.StoreTypePersistent)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (pr *SchemaBuilder) storeInfo(key string) (sst types.StoreType, ix int, err error) {
 	ix, has := binarySearch(pr.reserved, key)
 	if !has {
 		err = fmt.Errorf("prefix does not exist: %v", key)
@@ -838,7 +878,8 @@ func (pr *prefixRegistry) storeInfo(key string) (sst types.StoreType, ix int, er
 	return
 }
 
-func (pr *prefixRegistry) RegisterSubstore(key string, typ types.StoreType) error {
+// registerName registers a store key by name only
+func (pr *SchemaBuilder) registerName(key string, typ types.StoreType) error {
 	if !validSubStoreType(typ) {
 		return fmt.Errorf("StoreType not supported: %v", typ)
 	}
@@ -862,13 +903,12 @@ func (pr *prefixRegistry) RegisterSubstore(key string, typ types.StoreType) erro
 }
 
 func (tlm *traceListenMixin) AddListeners(skey types.StoreKey, listeners []types.WriteListener) {
-	key := skey.Name()
-	tlm.listeners[key] = append(tlm.listeners[key], listeners...)
+	tlm.listeners[skey] = append(tlm.listeners[skey], listeners...)
 }
 
 // ListeningEnabled returns if listening is enabled for a specific KVStore
 func (tlm *traceListenMixin) ListeningEnabled(key types.StoreKey) bool {
-	if ls, has := tlm.listeners[key.Name()]; has {
+	if ls, has := tlm.listeners[key]; has {
 		return len(ls) != 0
 	}
 	return false
@@ -880,16 +920,39 @@ func (tlm *traceListenMixin) TracingEnabled() bool {
 func (tlm *traceListenMixin) SetTracer(w io.Writer) {
 	tlm.TraceWriter = w
 }
-func (tlm *traceListenMixin) SetTraceContext(tc types.TraceContext) {
-	tlm.TraceContext = tc
+func (tlm *traceListenMixin) SetTracingContext(tc types.TraceContext) {
+	tlm.traceContextMutex.Lock()
+	defer tlm.traceContextMutex.Unlock()
+	if tlm.TraceContext != nil {
+		for k, v := range tc {
+			tlm.TraceContext[k] = v
+		}
+	} else {
+		tlm.TraceContext = tc
+	}
+}
+
+func (tlm *traceListenMixin) getTracingContext() types.TraceContext {
+	tlm.traceContextMutex.Lock()
+	defer tlm.traceContextMutex.Unlock()
+
+	if tlm.TraceContext == nil {
+		return nil
+	}
+
+	ctx := types.TraceContext{}
+	for k, v := range tlm.TraceContext {
+		ctx[k] = v
+	}
+	return ctx
 }
 
 func (tlm *traceListenMixin) wrapTraceListen(store types.KVStore, skey types.StoreKey) types.KVStore {
 	if tlm.TracingEnabled() {
-		store = tracekv.NewStore(store, tlm.TraceWriter, tlm.TraceContext)
+		store = tracekv.NewStore(store, tlm.TraceWriter, tlm.getTracingContext())
 	}
 	if tlm.ListeningEnabled(skey) {
-		store = listenkv.NewStore(store, skey, tlm.listeners[skey.Name()])
+		store = listenkv.NewStore(store, skey, tlm.listeners[skey])
 	}
 	return store
 }
@@ -897,9 +960,11 @@ func (tlm *traceListenMixin) wrapTraceListen(store types.KVStore, skey types.Sto
 func (s *Store) GetPruning() types.PruningOptions   { return s.Pruning }
 func (s *Store) SetPruning(po types.PruningOptions) { s.Pruning = po }
 
-func (rs *Store) Restore(height uint64, format uint32, chunks <-chan io.ReadCloser, ready chan<- struct{}) error {
-	return nil
+func (rs *Store) Restore(
+	height uint64, format uint32, protoReader protoio.Reader,
+) (snapshottypes.SnapshotItem, error) {
+	return snapshottypes.SnapshotItem{}, nil
 }
-func (rs *Store) Snapshot(height uint64, format uint32) (<-chan io.ReadCloser, error) {
-	return nil, nil
+func (rs *Store) Snapshot(height uint64, protoWriter protoio.Writer) error {
+	return nil
 }
