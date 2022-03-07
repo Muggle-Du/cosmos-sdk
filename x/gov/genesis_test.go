@@ -8,8 +8,8 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
-	dbm "github.com/tendermint/tm-db"
 
+	"github.com/cosmos/cosmos-sdk/db/memdb"
 	"github.com/cosmos/cosmos-sdk/simapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/auth"
@@ -37,11 +37,11 @@ func TestImportExportQueues(t *testing.T) {
 	// Create two proposals, put the second into the voting period
 	proposal1, err := app.GovKeeper.SubmitProposal(ctx, []sdk.Msg{mkTestLegacyContent(t)}, nil)
 	require.NoError(t, err)
-	proposalID1 := proposal1.ProposalId
+	proposalID1 := proposal1.Id
 
 	proposal2, err := app.GovKeeper.SubmitProposal(ctx, []sdk.Msg{mkTestLegacyContent(t)}, nil)
 	require.NoError(t, err)
-	proposalID2 := proposal2.ProposalId
+	proposalID2 := proposal2.Id
 
 	votingStarted, err := app.GovKeeper.AddDeposit(ctx, proposalID2, addrs[0], app.GovKeeper.GetDepositParams(ctx).MinDeposit)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestImportExportQueues(t *testing.T) {
 		panic(err)
 	}
 
-	db := dbm.NewMemDB()
+	db := memdb.NewDB()
 	app2 := simapp.NewSimApp(log.NewNopLogger(), db, nil, true, map[int64]bool{}, simapp.DefaultNodeHome, 0, simapp.MakeTestEncodingConfig(), simapp.EmptyAppOptions{})
 
 	app2.InitChain(
