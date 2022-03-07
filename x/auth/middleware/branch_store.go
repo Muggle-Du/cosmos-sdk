@@ -55,15 +55,15 @@ func branchAndRun(ctx context.Context, req tx.Request, fn nextFn) (tx.Response, 
 // a branched multi-store.
 func branchStore(sdkCtx sdk.Context, tx tmtypes.Tx) (sdk.Context, sdk.CacheMultiStore) {
 	ms := sdkCtx.MultiStore()
-	msCache := ms.CacheWrap()
+	msCache := ms.CacheMultiStore()
 	if msCache.TracingEnabled() {
-		msCache.SetTracingContext(
+		msCache = msCache.SetTracingContext(
 			sdk.TraceContext(
 				map[string]interface{}{
 					"txHash": tx.Hash(),
 				},
 			),
-		)
+		).(sdk.CacheMultiStore)
 	}
 
 	return sdkCtx.WithMultiStore(msCache), msCache

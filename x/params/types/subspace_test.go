@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tendermint/tendermint/libs/log"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
+	dbm "github.com/tendermint/tm-db"
 
 	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/cosmos/cosmos-sdk/db/memdb"
 	"github.com/cosmos/cosmos-sdk/simapp"
-	"github.com/cosmos/cosmos-sdk/store/v2/multi"
+	"github.com/cosmos/cosmos-sdk/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/params/types"
 )
@@ -29,13 +29,12 @@ type SubspaceTestSuite struct {
 }
 
 func (suite *SubspaceTestSuite) SetupTest() {
-	db := memdb.NewDB()
+	db := dbm.NewMemDB()
 
-	config := multi.DefaultStoreParams()
-	suite.NoError(config.RegisterSubstore(key, storetypes.StoreTypePersistent))
-	suite.NoError(config.RegisterSubstore(tkey, storetypes.StoreTypeTransient))
-	ms, err := multi.NewV1MultiStoreAsV2(db, config)
-	suite.NoError(err)
+	ms := store.NewCommitMultiStore(db)
+	ms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(tkey, storetypes.StoreTypeTransient, db)
+	suite.NoError(ms.LoadLatestVersion())
 
 	encCfg := simapp.MakeTestEncodingConfig()
 	ss := types.NewSubspace(encCfg.Codec, encCfg.Amino, key, tkey, "testsubspace")

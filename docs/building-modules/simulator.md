@@ -12,11 +12,12 @@ integrated with the application `SimulationManager`.
 * [Simulation package](#simulation-package)
     * [Store decoders](#store-decoders)
     * [Randomized genesis](#randomized-genesis)
-    * [Randomized parameter changes](#randomized-parameter-changes)
+    * [Randomized parameters](#randomized-parameters)
     * [Random weighted operations](#random-weighted-operations)
     * [Random proposal contents](#random-proposal-contents)
-* [Registering simulation functions](#registering-simulation-functions)
-* [App Simulator manager](#app-simulator-manager)
+* [Registering the module simulation functions](#registering-simulation-functions)
+* [App simulator manager](#app-simulator-manager)
+* [Simulation tests](#simulation-tests)
 
 ## Simulation package
 

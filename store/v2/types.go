@@ -56,32 +56,20 @@ var (
 	KVStoreReversePrefixIterator = v1.KVStoreReversePrefixIterator
 
 	NewStoreKVPairWriteListener = v1.NewStoreKVPairWriteListener
-
-	AssertValidKey   = v1.AssertValidKey
-	AssertValidValue = v1.AssertValidValue
-
-	CommitmentOpDecoder = v1.CommitmentOpDecoder
-	ProofOpFromMap      = v1.ProofOpFromMap
-
-	ProofOpSMTCommitment          = v1.ProofOpSMTCommitment
-	ProofOpSimpleMerkleCommitment = v1.ProofOpSimpleMerkleCommitment
-	NewSmtCommitmentOp            = v1.NewSmtCommitmentOp
 )
 
-// MultiStore defines a minimal interface for accessing root state.
-type MultiStore interface {
+// BasicMultiStore defines a minimal interface for accessing root state.
+type BasicMultiStore interface {
 	// Returns a KVStore which has access only to the namespace of the StoreKey.
 	// Panics if the key is not found in the schema.
 	GetKVStore(StoreKey) KVStore
-	// Returns a branched store whose modifications are later merged back in.
-	CacheWrap() CacheMultiStore
 }
 
 // mixin interface for trace and listen methods
 type rootStoreTraceListen interface {
 	TracingEnabled() bool
 	SetTracer(w io.Writer)
-	SetTracingContext(TraceContext)
+	SetTraceContext(TraceContext)
 	ListeningEnabled(key StoreKey) bool
 	AddListeners(key StoreKey, listeners []WriteListener)
 }
@@ -89,28 +77,29 @@ type rootStoreTraceListen interface {
 // CommitMultiStore defines a complete interface for persistent root state, including
 // (read-only) access to past versions, pruning, trace/listen, and state snapshots.
 type CommitMultiStore interface {
-	MultiStore
+	BasicMultiStore
 	rootStoreTraceListen
 	Committer
 	snapshottypes.Snapshotter
 
 	// Gets a read-only view of the store at a specific version.
 	// Returns an error if the version is not found.
-	GetVersion(int64) (MultiStore, error)
+	GetVersion(int64) (BasicMultiStore, error)
 	// Closes the store and all backing transactions.
 	Close() error
+	// Returns a branched whose modifications are later merged back in.
+	CacheMultiStore() CacheMultiStore
 	// Defines the minimum version number that can be saved by this store.
 	SetInitialVersion(uint64) error
-	// Gets all versions in the DB
-	// https://github.com/cosmos/cosmos-sdk/pull/11124
-	GetAllVersions() []int
 }
 
 // CacheMultiStore defines a branch of the root state which can be written back to the source store.
 type CacheMultiStore interface {
-	MultiStore
+	BasicMultiStore
 	rootStoreTraceListen
 
+	// Returns a branched whose modifications are later merged back in.
+	CacheMultiStore() CacheMultiStore
 	// Write all cached changes back to the source store. Note: this overwrites any intervening changes.
 	Write()
 }

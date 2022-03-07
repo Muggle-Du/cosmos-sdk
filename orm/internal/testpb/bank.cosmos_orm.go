@@ -10,7 +10,7 @@ import (
 	ormerrors "github.com/cosmos/cosmos-sdk/orm/types/ormerrors"
 )
 
-type BalanceTable interface {
+type BalanceStore interface {
 	Insert(ctx context.Context, balance *Balance) error
 	Update(ctx context.Context, balance *Balance) error
 	Save(ctx context.Context, balance *Balance) error
@@ -76,31 +76,31 @@ func (this BalanceDenomIndexKey) WithDenom(denom string) BalanceDenomIndexKey {
 	return this
 }
 
-type balanceTable struct {
+type balanceStore struct {
 	table ormtable.Table
 }
 
-func (this balanceTable) Insert(ctx context.Context, balance *Balance) error {
+func (this balanceStore) Insert(ctx context.Context, balance *Balance) error {
 	return this.table.Insert(ctx, balance)
 }
 
-func (this balanceTable) Update(ctx context.Context, balance *Balance) error {
+func (this balanceStore) Update(ctx context.Context, balance *Balance) error {
 	return this.table.Update(ctx, balance)
 }
 
-func (this balanceTable) Save(ctx context.Context, balance *Balance) error {
+func (this balanceStore) Save(ctx context.Context, balance *Balance) error {
 	return this.table.Save(ctx, balance)
 }
 
-func (this balanceTable) Delete(ctx context.Context, balance *Balance) error {
+func (this balanceStore) Delete(ctx context.Context, balance *Balance) error {
 	return this.table.Delete(ctx, balance)
 }
 
-func (this balanceTable) Has(ctx context.Context, address string, denom string) (found bool, err error) {
+func (this balanceStore) Has(ctx context.Context, address string, denom string) (found bool, err error) {
 	return this.table.PrimaryKey().Has(ctx, address, denom)
 }
 
-func (this balanceTable) Get(ctx context.Context, address string, denom string) (*Balance, error) {
+func (this balanceStore) Get(ctx context.Context, address string, denom string) (*Balance, error) {
 	var balance Balance
 	found, err := this.table.PrimaryKey().Get(ctx, &balance, address, denom)
 	if err != nil {
@@ -112,37 +112,37 @@ func (this balanceTable) Get(ctx context.Context, address string, denom string) 
 	return &balance, nil
 }
 
-func (this balanceTable) List(ctx context.Context, prefixKey BalanceIndexKey, opts ...ormlist.Option) (BalanceIterator, error) {
+func (this balanceStore) List(ctx context.Context, prefixKey BalanceIndexKey, opts ...ormlist.Option) (BalanceIterator, error) {
 	it, err := this.table.GetIndexByID(prefixKey.id()).List(ctx, prefixKey.values(), opts...)
 	return BalanceIterator{it}, err
 }
 
-func (this balanceTable) ListRange(ctx context.Context, from, to BalanceIndexKey, opts ...ormlist.Option) (BalanceIterator, error) {
+func (this balanceStore) ListRange(ctx context.Context, from, to BalanceIndexKey, opts ...ormlist.Option) (BalanceIterator, error) {
 	it, err := this.table.GetIndexByID(from.id()).ListRange(ctx, from.values(), to.values(), opts...)
 	return BalanceIterator{it}, err
 }
 
-func (this balanceTable) DeleteBy(ctx context.Context, prefixKey BalanceIndexKey) error {
+func (this balanceStore) DeleteBy(ctx context.Context, prefixKey BalanceIndexKey) error {
 	return this.table.GetIndexByID(prefixKey.id()).DeleteBy(ctx, prefixKey.values()...)
 }
 
-func (this balanceTable) DeleteRange(ctx context.Context, from, to BalanceIndexKey) error {
+func (this balanceStore) DeleteRange(ctx context.Context, from, to BalanceIndexKey) error {
 	return this.table.GetIndexByID(from.id()).DeleteRange(ctx, from.values(), to.values())
 }
 
-func (this balanceTable) doNotImplement() {}
+func (this balanceStore) doNotImplement() {}
 
-var _ BalanceTable = balanceTable{}
+var _ BalanceStore = balanceStore{}
 
-func NewBalanceTable(db ormtable.Schema) (BalanceTable, error) {
+func NewBalanceStore(db ormtable.Schema) (BalanceStore, error) {
 	table := db.GetTable(&Balance{})
 	if table == nil {
 		return nil, ormerrors.TableNotFound.Wrap(string((&Balance{}).ProtoReflect().Descriptor().FullName()))
 	}
-	return balanceTable{table}, nil
+	return balanceStore{table}, nil
 }
 
-type SupplyTable interface {
+type SupplyStore interface {
 	Insert(ctx context.Context, supply *Supply) error
 	Update(ctx context.Context, supply *Supply) error
 	Save(ctx context.Context, supply *Supply) error
@@ -190,31 +190,31 @@ func (this SupplyDenomIndexKey) WithDenom(denom string) SupplyDenomIndexKey {
 	return this
 }
 
-type supplyTable struct {
+type supplyStore struct {
 	table ormtable.Table
 }
 
-func (this supplyTable) Insert(ctx context.Context, supply *Supply) error {
+func (this supplyStore) Insert(ctx context.Context, supply *Supply) error {
 	return this.table.Insert(ctx, supply)
 }
 
-func (this supplyTable) Update(ctx context.Context, supply *Supply) error {
+func (this supplyStore) Update(ctx context.Context, supply *Supply) error {
 	return this.table.Update(ctx, supply)
 }
 
-func (this supplyTable) Save(ctx context.Context, supply *Supply) error {
+func (this supplyStore) Save(ctx context.Context, supply *Supply) error {
 	return this.table.Save(ctx, supply)
 }
 
-func (this supplyTable) Delete(ctx context.Context, supply *Supply) error {
+func (this supplyStore) Delete(ctx context.Context, supply *Supply) error {
 	return this.table.Delete(ctx, supply)
 }
 
-func (this supplyTable) Has(ctx context.Context, denom string) (found bool, err error) {
+func (this supplyStore) Has(ctx context.Context, denom string) (found bool, err error) {
 	return this.table.PrimaryKey().Has(ctx, denom)
 }
 
-func (this supplyTable) Get(ctx context.Context, denom string) (*Supply, error) {
+func (this supplyStore) Get(ctx context.Context, denom string) (*Supply, error) {
 	var supply Supply
 	found, err := this.table.PrimaryKey().Get(ctx, &supply, denom)
 	if err != nil {
@@ -226,53 +226,53 @@ func (this supplyTable) Get(ctx context.Context, denom string) (*Supply, error) 
 	return &supply, nil
 }
 
-func (this supplyTable) List(ctx context.Context, prefixKey SupplyIndexKey, opts ...ormlist.Option) (SupplyIterator, error) {
+func (this supplyStore) List(ctx context.Context, prefixKey SupplyIndexKey, opts ...ormlist.Option) (SupplyIterator, error) {
 	it, err := this.table.GetIndexByID(prefixKey.id()).List(ctx, prefixKey.values(), opts...)
 	return SupplyIterator{it}, err
 }
 
-func (this supplyTable) ListRange(ctx context.Context, from, to SupplyIndexKey, opts ...ormlist.Option) (SupplyIterator, error) {
+func (this supplyStore) ListRange(ctx context.Context, from, to SupplyIndexKey, opts ...ormlist.Option) (SupplyIterator, error) {
 	it, err := this.table.GetIndexByID(from.id()).ListRange(ctx, from.values(), to.values(), opts...)
 	return SupplyIterator{it}, err
 }
 
-func (this supplyTable) DeleteBy(ctx context.Context, prefixKey SupplyIndexKey) error {
+func (this supplyStore) DeleteBy(ctx context.Context, prefixKey SupplyIndexKey) error {
 	return this.table.GetIndexByID(prefixKey.id()).DeleteBy(ctx, prefixKey.values()...)
 }
 
-func (this supplyTable) DeleteRange(ctx context.Context, from, to SupplyIndexKey) error {
+func (this supplyStore) DeleteRange(ctx context.Context, from, to SupplyIndexKey) error {
 	return this.table.GetIndexByID(from.id()).DeleteRange(ctx, from.values(), to.values())
 }
 
-func (this supplyTable) doNotImplement() {}
+func (this supplyStore) doNotImplement() {}
 
-var _ SupplyTable = supplyTable{}
+var _ SupplyStore = supplyStore{}
 
-func NewSupplyTable(db ormtable.Schema) (SupplyTable, error) {
+func NewSupplyStore(db ormtable.Schema) (SupplyStore, error) {
 	table := db.GetTable(&Supply{})
 	if table == nil {
 		return nil, ormerrors.TableNotFound.Wrap(string((&Supply{}).ProtoReflect().Descriptor().FullName()))
 	}
-	return supplyTable{table}, nil
+	return supplyStore{table}, nil
 }
 
 type BankStore interface {
-	BalanceTable() BalanceTable
-	SupplyTable() SupplyTable
+	BalanceStore() BalanceStore
+	SupplyStore() SupplyStore
 
 	doNotImplement()
 }
 
 type bankStore struct {
-	balance BalanceTable
-	supply  SupplyTable
+	balance BalanceStore
+	supply  SupplyStore
 }
 
-func (x bankStore) BalanceTable() BalanceTable {
+func (x bankStore) BalanceStore() BalanceStore {
 	return x.balance
 }
 
-func (x bankStore) SupplyTable() SupplyTable {
+func (x bankStore) SupplyStore() SupplyStore {
 	return x.supply
 }
 
@@ -281,18 +281,18 @@ func (bankStore) doNotImplement() {}
 var _ BankStore = bankStore{}
 
 func NewBankStore(db ormtable.Schema) (BankStore, error) {
-	balanceTable, err := NewBalanceTable(db)
+	balanceStore, err := NewBalanceStore(db)
 	if err != nil {
 		return nil, err
 	}
 
-	supplyTable, err := NewSupplyTable(db)
+	supplyStore, err := NewSupplyStore(db)
 	if err != nil {
 		return nil, err
 	}
 
 	return bankStore{
-		balanceTable,
-		supplyTable,
+		balanceStore,
+		supplyStore,
 	}, nil
 }

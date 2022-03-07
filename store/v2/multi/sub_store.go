@@ -1,4 +1,4 @@
-package multi
+package root
 
 import (
 	"crypto/sha256"
@@ -10,7 +10,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/store/cachekv"
 	"github.com/cosmos/cosmos-sdk/store/listenkv"
 	"github.com/cosmos/cosmos-sdk/store/tracekv"
-	types "github.com/cosmos/cosmos-sdk/store/v2"
+	"github.com/cosmos/cosmos-sdk/store/types"
 )
 
 // Get implements KVStore.

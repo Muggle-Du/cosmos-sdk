@@ -33,7 +33,7 @@ func NewProposal(messages []sdk.Msg, id uint64, metadata []byte, submitTime, dep
 	tally := EmptyTallyResult()
 
 	p := Proposal{
-		Id:               id,
+		ProposalId:       id,
 		Messages:         msgs,
 		Metadata:         metadata,
 		Status:           StatusDepositPeriod,
@@ -65,7 +65,7 @@ func (p Proposals) String() string {
 	out := "ID - (Status) [Type] Title\n"
 	for _, prop := range p {
 		out += fmt.Sprintf("%d - %s\n",
-			prop.Id, prop.Status)
+			prop.ProposalId, prop.Status)
 	}
 	return strings.TrimSpace(out)
 }

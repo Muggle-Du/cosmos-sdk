@@ -22,7 +22,7 @@ func (s GenesisState) Validate() error {
 		if err := g.ValidateBasic(); err != nil {
 			return sdkerrors.Wrap(err, "Group validation failed")
 		}
-		groups[g.Id] = *g
+		groups[g.GroupId] = *g
 	}
 
 	for _, g := range s.GroupPolicies {
@@ -61,7 +61,7 @@ func (s GenesisState) Validate() error {
 		if err := p.ValidateBasic(); err != nil {
 			return sdkerrors.Wrap(err, "Proposal validation failed")
 		}
-		proposals[p.Id] = *p
+		proposals[p.ProposalId] = *p
 	}
 
 	for _, v := range s.Votes {

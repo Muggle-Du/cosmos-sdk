@@ -18,31 +18,17 @@ import (
 func (app *SimApp) ExportAppStateAndValidators(
 	forZeroHeight bool, jailAllowedAddrs []string,
 ) (servertypes.ExportedApp, error) {
-	return app.ExportAppStateAndValidatorsAt(forZeroHeight, jailAllowedAddrs, 0)
-}
-
-// ExportAppStateAndValidatorsAt exports the application state at a given block
-// height for a genesis file.
-// Passing a height < 1 will export for the latest block height.
-func (app *SimApp) ExportAppStateAndValidatorsAt(
-	forZeroHeight bool, jailAllowedAddrs []string, height int64,
-) (servertypes.ExportedApp, error) {
-	if height < 1 {
-		height = app.LastBlockHeight()
-	}
 	// as if they could withdraw from the start of the next block
-	ctx, err := app.NewContextAt(true, tmproto.Header{Height: height}, height)
-	if err != nil {
-		return servertypes.ExportedApp{}, err
-	}
+	ctx := app.NewContext(true, tmproto.Header{Height: app.LastBlockHeight()})
 
 	// We export at last height + 1, because that's the height at which
 	// Tendermint will start InitChain.
-	exportHeight := height + 1
+	height := app.LastBlockHeight() + 1
 	if forZeroHeight {
-		exportHeight = 0
+		height = 0
 		app.prepForZeroHeightGenesis(ctx, jailAllowedAddrs)
 	}
+
 	genState := app.mm.ExportGenesis(ctx, app.appCodec)
 	appState, err := json.MarshalIndent(genState, "", "  ")
 	if err != nil {
@@ -53,7 +39,7 @@ func (app *SimApp) ExportAppStateAndValidatorsAt(
 	return servertypes.ExportedApp{
 		AppState:        appState,
 		Validators:      validators,
-		Height:          exportHeight,
+		Height:          height,
 		ConsensusParams: app.BaseApp.GetConsensusParams(ctx),
 	}, err
 }

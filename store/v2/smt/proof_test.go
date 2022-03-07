@@ -14,8 +14,7 @@ import (
 
 func TestProofOpInterface(t *testing.T) {
 	hasher := sha256.New()
-	nodes, values := memdb.NewDB(), memdb.NewDB()
-	tree := smt.NewSparseMerkleTree(nodes.ReadWriter(), values.ReadWriter(), hasher)
+	tree := smt.NewSparseMerkleTree(memdb.NewDB().ReadWriter(), memdb.NewDB().ReadWriter(), hasher)
 	key := []byte("foo")
 	value := []byte("bar")
 	root, err := tree.Update(key, value)

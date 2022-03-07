@@ -113,7 +113,6 @@ func readVersionsFile(path string) (*versionManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	file.Close()
 	var (
 		versions []uint64
 		lastTs   uint64
@@ -130,7 +129,6 @@ func readVersionsFile(path string) (*versionManager, error) {
 		}
 		if version == 0 { // 0 maps to the latest timestamp
 			lastTs = ts
-			continue
 		}
 		versions = append(versions, version)
 		vmap[version] = ts
@@ -145,6 +143,12 @@ func readVersionsFile(path string) (*versionManager, error) {
 
 // Write version metadata to CSV file
 func writeVersionsFile(vm *versionManager, path string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	w := csv.NewWriter(file)
 	rows := [][]string{
 		[]string{"0", strconv.FormatUint(vm.lastTs, 10)},
 	}
@@ -159,12 +163,6 @@ func writeVersionsFile(vm *versionManager, path string) error {
 			strconv.FormatUint(ts, 10),
 		})
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	w := csv.NewWriter(file)
 	return w.WriteAll(rows)
 }
 
@@ -201,10 +199,7 @@ func (b *BadgerDB) Writer() db.DBWriter {
 func (b *BadgerDB) Close() error {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	err := writeVersionsFile(b.vmgr, filepath.Join(b.db.Opts().Dir, versionsFilename))
-	if err != nil {
-		return err
-	}
+	writeVersionsFile(b.vmgr, filepath.Join(b.db.Opts().Dir, versionsFilename))
 	return b.db.Close()
 }
 
@@ -223,11 +218,7 @@ func (b *BadgerDB) save(target uint64) (uint64, error) {
 		return 0, db.ErrOpenTransactions
 	}
 	b.vmgr = b.vmgr.Copy()
-	v, err := b.vmgr.Save(target)
-	if err != nil {
-		return v, err
-	}
-	return v, writeVersionsFile(b.vmgr, filepath.Join(b.db.Opts().Dir, versionsFilename))
+	return b.vmgr.Save(target)
 }
 
 // SaveNextVersion implements DBConnection.
@@ -252,7 +243,7 @@ func (b *BadgerDB) DeleteVersion(target uint64) error {
 	}
 	b.vmgr = b.vmgr.Copy()
 	b.vmgr.Delete(target)
-	return writeVersionsFile(b.vmgr, filepath.Join(b.db.Opts().Dir, versionsFilename))
+	return nil
 }
 
 func (b *BadgerDB) Revert() error {
@@ -368,34 +359,14 @@ func (tx *badgerWriter) Set(key, value []byte) error {
 	if err := dbutil.ValidateKv(key, value); err != nil {
 		return err
 	}
-	err := tx.txn.Set(key, value)
-	if errors.Is(err, badger.ErrTxnTooBig) {
-		err = tx.Commit()
-		if err != nil {
-			return err
-		}
-		newtx := tx.db.ReadWriter().(*badgerWriter)
-		*tx = *newtx
-		err = tx.txn.Set(key, value)
-	}
-	return err
+	return tx.txn.Set(key, value)
 }
 
 func (tx *badgerWriter) Delete(key []byte) error {
 	if len(key) == 0 {
 		return db.ErrKeyEmpty
 	}
-	err := tx.txn.Delete(key)
-	if errors.Is(err, badger.ErrTxnTooBig) {
-		err = tx.Commit()
-		if err != nil {
-			return err
-		}
-		newtx := tx.db.ReadWriter().(*badgerWriter)
-		*tx = *newtx
-		err = tx.txn.Delete(key)
-	}
-	return err
+	return tx.txn.Delete(key)
 }
 
 func (tx *badgerWriter) Commit() (err error) {

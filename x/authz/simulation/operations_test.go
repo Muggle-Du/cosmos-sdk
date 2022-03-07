@@ -40,18 +40,19 @@ func (suite *SimTestSuite) TestWeightedOperations() {
 		suite.app.BankKeeper, suite.app.AuthzKeeper, cdc,
 	)
 
-	s := rand.NewSource(3)
+	// setup 3 accounts
+	s := rand.NewSource(1)
 	r := rand.New(s)
-	// setup 2 accounts
 	accs := suite.getTestingAccounts(r, 2)
 
 	expected := []struct {
 		weight     int
 		opMsgRoute string
+		opMsgName  string
 	}{
-		{simulation.WeightGrant, simulation.TypeMsgGrant},
-		{simulation.WeightExec, simulation.TypeMsgExec},
-		{simulation.WeightRevoke, simulation.TypeMsgRevoke},
+		{simulation.WeightGrant, simulation.TypeMsgGrant, simulation.TypeMsgGrant},
+		{simulation.WeightExec, simulation.TypeMsgExec, simulation.TypeMsgExec},
+		{simulation.WeightRevoke, simulation.TypeMsgRevoke, simulation.TypeMsgRevoke},
 	}
 
 	for i, w := range weightedOps {
@@ -61,7 +62,7 @@ func (suite *SimTestSuite) TestWeightedOperations() {
 		// will fail
 		suite.Require().Equal(expected[i].weight, w.Weight(), "weight should be the same")
 		suite.Require().Equal(expected[i].opMsgRoute, operationMsg.Route, "route should be the same")
-		suite.Require().Equal(expected[i].opMsgRoute, operationMsg.Name, "operation Msg name should be the same")
+		suite.Require().Equal(expected[i].opMsgName, operationMsg.Name, "operation Msg name should be the same")
 	}
 }
 
@@ -105,7 +106,7 @@ func (suite *SimTestSuite) TestSimulateGrant() {
 	suite.Require().NoError(err)
 
 	var msg authz.MsgGrant
-	suite.app.LegacyAmino().UnmarshalJSON(operationMsg.Msg, &msg)
+	suite.app.AppCodec().UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(granter.Address.String(), msg.Granter)
 	suite.Require().Equal(grantee.Address.String(), msg.Grantee)
@@ -142,7 +143,7 @@ func (suite *SimTestSuite) TestSimulateRevoke() {
 	suite.Require().NoError(err)
 
 	var msg authz.MsgRevoke
-	suite.app.LegacyAmino().UnmarshalJSON(operationMsg.Msg, &msg)
+	suite.app.AppCodec().UnmarshalJSON(operationMsg.Msg, &msg)
 
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(granter.Address.String(), msg.Granter)
@@ -168,7 +169,7 @@ func (suite *SimTestSuite) TestSimulateExec() {
 	grantee := accounts[1]
 	authorization := banktypes.NewSendAuthorization(initCoins)
 
-	err := suite.app.AuthzKeeper.SaveGrant(suite.ctx, grantee.Address, granter.Address, authorization, suite.ctx.BlockTime().Add(1*time.Hour))
+	err := suite.app.AuthzKeeper.SaveGrant(suite.ctx, grantee.Address, granter.Address, authorization, time.Now().Add(30*time.Hour))
 	suite.Require().NoError(err)
 
 	// execute operation
@@ -178,7 +179,7 @@ func (suite *SimTestSuite) TestSimulateExec() {
 
 	var msg authz.MsgExec
 
-	suite.app.LegacyAmino().UnmarshalJSON(operationMsg.Msg, &msg)
+	suite.app.AppCodec().UnmarshalJSON(operationMsg.Msg, &msg)
 
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(grantee.Address.String(), msg.Grantee)

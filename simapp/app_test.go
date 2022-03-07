@@ -9,9 +9,9 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
+	dbm "github.com/tendermint/tm-db"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
-	"github.com/cosmos/cosmos-sdk/db/memdb"
 	"github.com/cosmos/cosmos-sdk/tests/mocks"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
@@ -38,8 +38,8 @@ import (
 
 func TestSimAppExportAndBlockedAddrs(t *testing.T) {
 	encCfg := MakeTestEncodingConfig()
+	db := dbm.NewMemDB()
 	logger, _ := log.NewDefaultLogger("plain", "info", false)
-	db := memdb.NewDB()
 	app := NewSimappWithCustomOptions(t, false, SetupOptions{
 		Logger:             logger,
 		DB:                 db,
@@ -59,12 +59,10 @@ func TestSimAppExportAndBlockedAddrs(t *testing.T) {
 	}
 
 	app.Commit()
-	require.NoError(t, app.CloseStore())
 
 	logger2, _ := log.NewDefaultLogger("plain", "info", false)
 	// Making a new app object with the db, so that initchain hasn't been called
 	app2 := NewSimApp(logger2, db, nil, true, map[int64]bool{}, DefaultNodeHome, 0, encCfg, EmptyAppOptions{})
-	require.NoError(t, app2.Init())
 	_, err := app2.ExportAppStateAndValidators(false, []string{})
 	require.NoError(t, err, "ExportAppStateAndValidators should not have an error")
 }
@@ -75,12 +73,13 @@ func TestGetMaccPerms(t *testing.T) {
 }
 
 func TestRunMigrations(t *testing.T) {
+	db := dbm.NewMemDB()
 	encCfg := MakeTestEncodingConfig()
 	logger, _ := log.NewDefaultLogger("plain", "info", false)
-	app := NewSimApp(logger, memdb.NewDB(), nil, true, map[int64]bool{}, DefaultNodeHome, 0, encCfg, EmptyAppOptions{})
+	app := NewSimApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, 0, encCfg, EmptyAppOptions{})
 
 	// Create a new baseapp and configurator for the purpose of this test.
-	bApp := baseapp.NewBaseApp(appName, logger, memdb.NewDB())
+	bApp := baseapp.NewBaseApp(appName, logger, db)
 	bApp.SetCommitMultiStoreTracer(nil)
 	bApp.SetInterfaceRegistry(encCfg.InterfaceRegistry)
 	msr := authmiddleware.NewMsgServiceRouter(encCfg.InterfaceRegistry)
@@ -99,7 +98,6 @@ func TestRunMigrations(t *testing.T) {
 
 		module.RegisterServices(app.configurator)
 	}
-	require.NoError(t, app.Init())
 
 	// Initialize the chain
 	app.InitChain(abci.RequestInitChain{})
@@ -108,7 +106,7 @@ func TestRunMigrations(t *testing.T) {
 	testCases := []struct {
 		name         string
 		moduleName   string
-		fromVersion  uint64
+		forVersion   uint64
 		expRegErr    bool // errors while registering migration
 		expRegErrMsg string
 		expRunErr    bool // errors while running migration
@@ -136,7 +134,7 @@ func TestRunMigrations(t *testing.T) {
 			false, "", false, "", 1,
 		},
 		{
-			"cannot register migration handler for same module & fromVersion",
+			"cannot register migration handler for same module & forVersion",
 			"bank", 1,
 			true, "another migration for module bank and version 1 already exists: internal logic error", false, "", 0,
 		},
@@ -153,8 +151,8 @@ func TestRunMigrations(t *testing.T) {
 			called := 0
 
 			if tc.moduleName != "" {
-				// Register migration for module from version `fromVersion` to `fromVersion+1`.
-				err = app.configurator.RegisterMigration(tc.moduleName, tc.fromVersion, func(sdk.Context) error {
+				// Register migration for module from version `forVersion` to `forVersion+1`.
+				err = app.configurator.RegisterMigration(tc.moduleName, tc.forVersion, func(sdk.Context) error {
 					called++
 
 					return nil
@@ -205,11 +203,10 @@ func TestRunMigrations(t *testing.T) {
 }
 
 func TestInitGenesisOnMigration(t *testing.T) {
-	db := memdb.NewDB()
+	db := dbm.NewMemDB()
 	encCfg := MakeTestEncodingConfig()
 	logger, _ := log.NewDefaultLogger("plain", "info", false)
 	app := NewSimApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, 0, encCfg, EmptyAppOptions{})
-	require.NoError(t, app.Init())
 	ctx := app.NewContext(true, tmproto.Header{Height: app.LastBlockHeight()})
 
 	// Create a mock module. This module will serve as the new module we're
@@ -251,7 +248,7 @@ func TestInitGenesisOnMigration(t *testing.T) {
 
 func TestUpgradeStateOnGenesis(t *testing.T) {
 	encCfg := MakeTestEncodingConfig()
-	db := memdb.NewDB()
+	db := dbm.NewMemDB()
 	logger, _ := log.NewDefaultLogger("plain", "info", false)
 	app := NewSimappWithCustomOptions(t, false, SetupOptions{
 		Logger:             logger,

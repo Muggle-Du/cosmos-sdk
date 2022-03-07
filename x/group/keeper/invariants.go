@@ -46,7 +46,7 @@ func GroupTotalWeightInvariant(keeper Keeper) sdk.Invariant {
 	}
 }
 
-// TallyVotesSumInvariant checks that proposal FinalTallyResult must correspond to the vote option.
+// TallyVotesSumInvariant checks that proposal VoteState must correspond to the vote choice.
 func TallyVotesSumInvariant(keeper Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		msg, broken := TallyVotesSumInvariantHelper(ctx, keeper.key, keeper.groupTable, keeper.proposalTable, keeper.groupMemberTable, keeper.voteByProposalIndex, keeper.groupPolicyTable)
@@ -86,43 +86,43 @@ func TallyVotesInvariantHelper(ctx sdk.Context, prevCtx sdk.Context, key storety
 	}
 
 	for i := 0; i < len(prevProposals); i++ {
-		if prevProposals[i].Id == curProposals[i].Id {
-			prevYesCount, err := prevProposals[i].FinalTallyResult.GetYesCount()
+		if prevProposals[i].ProposalId == curProposals[i].ProposalId {
+			prevYesCount, err := prevProposals[i].VoteState.GetYesCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting yes votes weight of proposal at block height %d\n%v\n", prevCtx.BlockHeight(), err)
 				return msg, broken
 			}
-			curYesCount, err := curProposals[i].FinalTallyResult.GetYesCount()
+			curYesCount, err := curProposals[i].VoteState.GetYesCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting yes votes weight of proposal at block height %d\n%v\n", ctx.BlockHeight(), err)
 				return msg, broken
 			}
-			prevNoCount, err := prevProposals[i].FinalTallyResult.GetNoCount()
+			prevNoCount, err := prevProposals[i].VoteState.GetNoCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting no votes weight of proposal at block height %d\n%v\n", prevCtx.BlockHeight(), err)
 				return msg, broken
 			}
-			curNoCount, err := curProposals[i].FinalTallyResult.GetNoCount()
+			curNoCount, err := curProposals[i].VoteState.GetNoCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting no votes weight of proposal at block height %d\n%v\n", ctx.BlockHeight(), err)
 				return msg, broken
 			}
-			prevAbstainCount, err := prevProposals[i].FinalTallyResult.GetAbstainCount()
+			prevAbstainCount, err := prevProposals[i].VoteState.GetAbstainCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting abstain votes weight of proposal at block height %d\n%v\n", prevCtx.BlockHeight(), err)
 				return msg, broken
 			}
-			curAbstainCount, err := curProposals[i].FinalTallyResult.GetAbstainCount()
+			curAbstainCount, err := curProposals[i].VoteState.GetAbstainCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting abstain votes weight of proposal at block height %d\n%v\n", ctx.BlockHeight(), err)
 				return msg, broken
 			}
-			prevVetoCount, err := prevProposals[i].FinalTallyResult.GetNoWithVetoCount()
+			prevVetoCount, err := prevProposals[i].VoteState.GetVetoCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting veto votes weight of proposal at block height %d\n%v\n", prevCtx.BlockHeight(), err)
 				return msg, broken
 			}
-			curVetoCount, err := curProposals[i].FinalTallyResult.GetNoWithVetoCount()
+			curVetoCount, err := curProposals[i].VoteState.GetVetoCount()
 			if err != nil {
 				msg += fmt.Sprintf("error while getting veto votes weight of proposal at block height %d\n%v\n", ctx.BlockHeight(), err)
 				return msg, broken
@@ -162,11 +162,12 @@ func GroupTotalWeightInvariantHelper(ctx sdk.Context, key storetypes.StoreKey, g
 		if errors.ErrORMIteratorDone.Is(err) {
 			break
 		}
-		memIt, err := groupMemberByGroupIndex.Get(ctx.KVStore(key), groupInfo.Id)
+		memIt, err := groupMemberByGroupIndex.Get(ctx.KVStore(key), groupInfo.GroupId)
 		if err != nil {
-			msg += fmt.Sprintf("error while returning group member iterator for group with ID %d\n%v\n", groupInfo.Id, err)
+			msg += fmt.Sprintf("error while returning group member iterator for group with ID %d\n%v\n", groupInfo.GroupId, err)
 			return msg, broken
 		}
+		defer memIt.Close()
 
 		for {
 			_, err = memIt.LoadNext(&groupMember)
@@ -184,11 +185,9 @@ func GroupTotalWeightInvariantHelper(ctx sdk.Context, key storetypes.StoreKey, g
 				return msg, broken
 			}
 		}
-		memIt.Close()
-
 		groupWeight, err := groupmath.NewNonNegativeDecFromString(groupInfo.GetTotalWeight())
 		if err != nil {
-			msg += fmt.Sprintf("error while parsing non-nengative decimal for group with ID %d\n%v\n", groupInfo.Id, err)
+			msg += fmt.Sprintf("error while parsing non-nengative decimal for group with ID %d\n%v\n", groupInfo.GroupId, err)
 			return msg, broken
 		}
 
@@ -270,15 +269,16 @@ func TallyVotesSumInvariantHelper(ctx sdk.Context, key storetypes.StoreKey, grou
 		}
 
 		if groupInfo.Version != proposal.GroupVersion {
-			msg += fmt.Sprintf("group with id %d was modified\n", groupInfo.Id)
+			msg += fmt.Sprintf("group with id %d was modified\n", groupInfo.GroupId)
 			return msg, broken
 		}
 
-		voteIt, err := voteByProposalIndex.Get(ctx.KVStore(key), proposal.Id)
+		voteIt, err := voteByProposalIndex.Get(ctx.KVStore(key), proposal.ProposalId)
 		if err != nil {
-			msg += fmt.Sprintf("error while returning vote iterator for proposal with ID %d\n%v\n", proposal.Id, err)
+			msg += fmt.Sprintf("error while returning vote iterator for proposal with ID %d\n%v\n", proposal.ProposalId, err)
 			return msg, broken
 		}
+		defer voteIt.Close()
 
 		for {
 			_, err := voteIt.LoadNext(&vote)
@@ -303,26 +303,26 @@ func TallyVotesSumInvariantHelper(ctx sdk.Context, key storetypes.StoreKey, grou
 				return msg, broken
 			}
 
-			switch vote.Option {
-			case group.VOTE_OPTION_YES:
+			switch vote.Choice {
+			case group.Choice_CHOICE_YES:
 				yesVoteWeight, err = groupmath.Add(yesVoteWeight, curMemVotingWeight)
 				if err != nil {
 					msg += fmt.Sprintf("decimal addition error\n%v\n", err)
 					return msg, broken
 				}
-			case group.VOTE_OPTION_NO:
+			case group.Choice_CHOICE_NO:
 				noVoteWeight, err = groupmath.Add(noVoteWeight, curMemVotingWeight)
 				if err != nil {
 					msg += fmt.Sprintf("decimal addition error\n%v\n", err)
 					return msg, broken
 				}
-			case group.VOTE_OPTION_ABSTAIN:
+			case group.Choice_CHOICE_ABSTAIN:
 				abstainVoteWeight, err = groupmath.Add(abstainVoteWeight, curMemVotingWeight)
 				if err != nil {
 					msg += fmt.Sprintf("decimal addition error\n%v\n", err)
 					return msg, broken
 				}
-			case group.VOTE_OPTION_NO_WITH_VETO:
+			case group.Choice_CHOICE_VETO:
 				vetoVoteWeight, err = groupmath.Add(vetoVoteWeight, curMemVotingWeight)
 				if err != nil {
 					msg += fmt.Sprintf("decimal addition error\n%v\n", err)
@@ -330,43 +330,42 @@ func TallyVotesSumInvariantHelper(ctx sdk.Context, key storetypes.StoreKey, grou
 				}
 			}
 		}
-		voteIt.Close()
 
-		totalProposalVotes, err := proposal.FinalTallyResult.TotalCounts()
+		totalProposalVotes, err := proposal.VoteState.TotalCounts()
 		if err != nil {
-			msg += fmt.Sprintf("error while getting total weighted votes of proposal with ID %d\n%v\n", proposal.Id, err)
+			msg += fmt.Sprintf("error while getting total weighted votes of proposal with ID %d\n%v\n", proposal.ProposalId, err)
 			return msg, broken
 		}
-		proposalYesCount, err := proposal.FinalTallyResult.GetYesCount()
+		proposalYesCount, err := proposal.VoteState.GetYesCount()
 		if err != nil {
-			msg += fmt.Sprintf("error while getting the weighted sum of yes votes for proposal with ID %d\n%v\n", proposal.Id, err)
+			msg += fmt.Sprintf("error while getting the weighted sum of yes votes for proposal with ID %d\n%v\n", proposal.ProposalId, err)
 			return msg, broken
 		}
-		proposalNoCount, err := proposal.FinalTallyResult.GetNoCount()
+		proposalNoCount, err := proposal.VoteState.GetNoCount()
 		if err != nil {
-			msg += fmt.Sprintf("error while getting the weighted sum of no votes for proposal with ID %d\n%v\n", proposal.Id, err)
+			msg += fmt.Sprintf("error while getting the weighted sum of no votes for proposal with ID %d\n%v\n", proposal.ProposalId, err)
 			return msg, broken
 		}
-		proposalAbstainCount, err := proposal.FinalTallyResult.GetAbstainCount()
+		proposalAbstainCount, err := proposal.VoteState.GetAbstainCount()
 		if err != nil {
-			msg += fmt.Sprintf("error while getting the weighted sum of abstain votes for proposal with ID %d\n%v\n", proposal.Id, err)
+			msg += fmt.Sprintf("error while getting the weighted sum of abstain votes for proposal with ID %d\n%v\n", proposal.ProposalId, err)
 			return msg, broken
 		}
-		proposalVetoCount, err := proposal.FinalTallyResult.GetNoWithVetoCount()
+		proposalVetoCount, err := proposal.VoteState.GetVetoCount()
 		if err != nil {
-			msg += fmt.Sprintf("error while getting the weighted sum of veto votes for proposal with ID %d\n%v\n", proposal.Id, err)
+			msg += fmt.Sprintf("error while getting the weighted sum of veto votes for proposal with ID %d\n%v\n", proposal.ProposalId, err)
 			return msg, broken
 		}
 
 		if totalProposalVotes.Cmp(totalVotingWeight) != 0 {
 			broken = true
-			msg += fmt.Sprintf("proposal FinalTallyResult must correspond to the sum of votes weights\nProposal with ID %d has total proposal votes %s, but got sum of votes weights %s\n", proposal.Id, totalProposalVotes.String(), totalVotingWeight.String())
+			msg += fmt.Sprintf("proposal VoteState must correspond to the sum of votes weights\nProposal with ID %d has total proposal votes %s, but got sum of votes weights %s\n", proposal.ProposalId, totalProposalVotes.String(), totalVotingWeight.String())
 			break
 		}
 
 		if (yesVoteWeight.Cmp(proposalYesCount) != 0) || (noVoteWeight.Cmp(proposalNoCount) != 0) || (abstainVoteWeight.Cmp(proposalAbstainCount) != 0) || (vetoVoteWeight.Cmp(proposalVetoCount) != 0) {
 			broken = true
-			msg += fmt.Sprintf("proposal FinalTallyResult must correspond to the vote option\nProposal with ID %d and voter address %s must correspond to the vote option\n", proposal.Id, vote.Voter)
+			msg += fmt.Sprintf("proposal VoteState must correspond to the vote choice\nProposal with ID %d and voter address %s must correspond to the vote choice\n", proposal.ProposalId, vote.Voter)
 			break
 		}
 	}

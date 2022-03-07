@@ -1,7 +1,6 @@
 package simulation_test
 
 import (
-	"github.com/cosmos/cosmos-sdk/codec/legacy"
 	"math/rand"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func (suite *SimTestSuite) TestWeightedOperations() {
 		suite.app.BankKeeper, suite.app.GroupKeeper, cdc,
 	)
 
-	s := rand.NewSource(2)
+	s := rand.NewSource(1)
 	r := rand.New(s)
 	accs := suite.getTestingAccounts(r, 3)
 
@@ -52,9 +51,8 @@ func (suite *SimTestSuite) TestWeightedOperations() {
 	}{
 		{simulation.WeightMsgCreateGroup, group.MsgCreateGroup{}.Route(), simulation.TypeMsgCreateGroup},
 		{simulation.WeightMsgCreateGroupPolicy, group.MsgCreateGroupPolicy{}.Route(), simulation.TypeMsgCreateGroupPolicy},
-		// {simulation.WeightMsgCreateGroupWithPolicy, group.MsgCreateGroupWithPolicy{}.Route(), simulation.TypeMsgCreateGroupWithPolicy},
-		{simulation.WeightMsgSubmitProposal, group.MsgSubmitProposal{}.Route(), simulation.TypeMsgSubmitProposal},
-		{simulation.WeightMsgSubmitProposal, group.MsgSubmitProposal{}.Route(), simulation.TypeMsgSubmitProposal},
+		{simulation.WeightMsgCreateProposal, group.MsgCreateProposal{}.Route(), simulation.TypeMsgCreateProposal},
+		{simulation.WeightMsgCreateProposal, group.MsgCreateProposal{}.Route(), simulation.TypeMsgCreateProposal},
 		{simulation.WeightMsgWithdrawProposal, group.MsgWithdrawProposal{}.Route(), simulation.TypeMsgWithdrawProposal},
 		{simulation.WeightMsgVote, group.MsgVote{}.Route(), simulation.TypeMsgVote},
 		{simulation.WeightMsgExec, group.MsgExec{}.Route(), simulation.TypeMsgExec},
@@ -115,36 +113,7 @@ func (suite *SimTestSuite) TestSimulateCreateGroup() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgCreateGroup
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
-	suite.Require().NoError(err)
-	suite.Require().True(operationMsg.OK)
-	suite.Require().Equal(acc.Address.String(), msg.Admin)
-	suite.Require().Len(futureOperations, 0)
-}
-
-func (suite *SimTestSuite) TestSimulateCreateGroupWithPolicy() {
-	// setup 1 account
-	s := rand.NewSource(1)
-	r := rand.New(s)
-	accounts := suite.getTestingAccounts(r, 1)
-
-	// begin a new block
-	suite.app.BeginBlock(abci.RequestBeginBlock{
-		Header: tmproto.Header{
-			Height:  suite.app.LastBlockHeight() + 1,
-			AppHash: suite.app.LastCommitID().Hash,
-		},
-	})
-
-	acc := accounts[0]
-
-	// execute operation
-	op := simulation.SimulateMsgCreateGroupWithPolicy(suite.app.AccountKeeper, suite.app.BankKeeper)
-	operationMsg, futureOperations, err := op(r, suite.app.BaseApp, suite.ctx, accounts, "")
-	suite.Require().NoError(err)
-
-	var msg group.MsgCreateGroupWithPolicy
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(acc.Address.String(), msg.Admin)
@@ -186,14 +155,14 @@ func (suite *SimTestSuite) TestSimulateCreateGroupPolicy() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgCreateGroupPolicy
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(acc.Address.String(), msg.Admin)
 	suite.Require().Len(futureOperations, 0)
 }
 
-func (suite *SimTestSuite) TestSimulateSubmitProposal() {
+func (suite *SimTestSuite) TestSimulateCreateProposal() {
 	// setup 1 account
 	s := rand.NewSource(1)
 	r := rand.New(s)
@@ -235,12 +204,12 @@ func (suite *SimTestSuite) TestSimulateSubmitProposal() {
 	})
 
 	// execute operation
-	op := simulation.SimulateMsgSubmitProposal(suite.app.AccountKeeper, suite.app.BankKeeper, suite.app.GroupKeeper)
+	op := simulation.SimulateMsgCreateProposal(suite.app.AccountKeeper, suite.app.BankKeeper, suite.app.GroupKeeper)
 	operationMsg, futureOperations, err := op(r, suite.app.BaseApp, suite.ctx, accounts, "")
 	suite.Require().NoError(err)
 
-	var msg group.MsgSubmitProposal
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	var msg group.MsgCreateProposal
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(groupPolicyRes.Address, msg.Address)
@@ -282,7 +251,7 @@ func (suite *SimTestSuite) TestWithdrawProposal() {
 	suite.Require().NoError(err)
 
 	// setup a proposal
-	proposalReq, err := group.NewMsgSubmitProposalRequest(groupPolicyRes.Address, []string{addr}, []sdk.Msg{
+	proposalReq, err := group.NewMsgCreateProposalRequest(groupPolicyRes.Address, []string{addr}, []sdk.Msg{
 		&banktypes.MsgSend{
 			FromAddress: groupPolicyRes.Address,
 			ToAddress:   addr,
@@ -290,7 +259,7 @@ func (suite *SimTestSuite) TestWithdrawProposal() {
 		},
 	}, []byte{}, 0)
 	suite.Require().NoError(err)
-	_, err = suite.app.GroupKeeper.SubmitProposal(ctx, proposalReq)
+	_, err = suite.app.GroupKeeper.CreateProposal(ctx, proposalReq)
 	suite.Require().NoError(err)
 
 	// begin a new block
@@ -307,7 +276,7 @@ func (suite *SimTestSuite) TestWithdrawProposal() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgWithdrawProposal
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(addr, msg.Address)
@@ -349,7 +318,7 @@ func (suite *SimTestSuite) TestSimulateVote() {
 	suite.Require().NoError(err)
 
 	// setup a proposal
-	proposalReq, err := group.NewMsgSubmitProposalRequest(groupPolicyRes.Address, []string{addr}, []sdk.Msg{
+	proposalReq, err := group.NewMsgCreateProposalRequest(groupPolicyRes.Address, []string{addr}, []sdk.Msg{
 		&banktypes.MsgSend{
 			FromAddress: groupPolicyRes.Address,
 			ToAddress:   addr,
@@ -357,7 +326,7 @@ func (suite *SimTestSuite) TestSimulateVote() {
 		},
 	}, []byte{}, 0)
 	suite.Require().NoError(err)
-	_, err = suite.app.GroupKeeper.SubmitProposal(ctx, proposalReq)
+	_, err = suite.app.GroupKeeper.CreateProposal(ctx, proposalReq)
 	suite.Require().NoError(err)
 
 	// begin a new block
@@ -374,7 +343,7 @@ func (suite *SimTestSuite) TestSimulateVote() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgVote
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(addr, msg.Voter)
@@ -416,7 +385,7 @@ func (suite *SimTestSuite) TestSimulateExec() {
 	suite.Require().NoError(err)
 
 	// setup a proposal
-	proposalReq, err := group.NewMsgSubmitProposalRequest(groupPolicyRes.Address, []string{addr}, []sdk.Msg{
+	proposalReq, err := group.NewMsgCreateProposalRequest(groupPolicyRes.Address, []string{addr}, []sdk.Msg{
 		&banktypes.MsgSend{
 			FromAddress: groupPolicyRes.Address,
 			ToAddress:   addr,
@@ -424,14 +393,14 @@ func (suite *SimTestSuite) TestSimulateExec() {
 		},
 	}, []byte{}, 0)
 	suite.Require().NoError(err)
-	proposalRes, err := suite.app.GroupKeeper.SubmitProposal(ctx, proposalReq)
+	proposalRes, err := suite.app.GroupKeeper.CreateProposal(ctx, proposalReq)
 	suite.Require().NoError(err)
 
 	// vote
 	_, err = suite.app.GroupKeeper.Vote(ctx, &group.MsgVote{
 		ProposalId: proposalRes.ProposalId,
 		Voter:      addr,
-		Option:     group.VOTE_OPTION_YES,
+		Choice:     group.Choice_CHOICE_YES,
 	})
 	suite.Require().NoError(err)
 
@@ -449,7 +418,7 @@ func (suite *SimTestSuite) TestSimulateExec() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgExec
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(addr, msg.Signer)
@@ -491,7 +460,7 @@ func (suite *SimTestSuite) TestSimulateUpdateGroupAdmin() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgUpdateGroupAdmin
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(acc.Address.String(), msg.Admin)
@@ -533,7 +502,7 @@ func (suite *SimTestSuite) TestSimulateUpdateGroupMetadata() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgUpdateGroupMetadata
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(acc.Address.String(), msg.Admin)
@@ -575,7 +544,7 @@ func (suite *SimTestSuite) TestSimulateUpdateGroupMembers() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgUpdateGroupMembers
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(acc.Address.String(), msg.Admin)
@@ -629,7 +598,7 @@ func (suite *SimTestSuite) TestSimulateUpdateGroupPolicyAdmin() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgUpdateGroupPolicyAdmin
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(groupPolicyRes.Address, msg.Address)
@@ -683,7 +652,7 @@ func (suite *SimTestSuite) TestSimulateUpdateGroupPolicyDecisionPolicy() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgUpdateGroupPolicyDecisionPolicy
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(groupPolicyRes.Address, msg.Address)
@@ -737,7 +706,7 @@ func (suite *SimTestSuite) TestSimulateUpdateGroupPolicyMetadata() {
 	suite.Require().NoError(err)
 
 	var msg group.MsgUpdateGroupPolicyMetadata
-	err = legacy.Cdc.UnmarshalJSON(operationMsg.Msg, &msg)
+	err = group.ModuleCdc.UnmarshalJSON(operationMsg.Msg, &msg)
 	suite.Require().NoError(err)
 	suite.Require().True(operationMsg.OK)
 	suite.Require().Equal(groupPolicyRes.Address, msg.Address)

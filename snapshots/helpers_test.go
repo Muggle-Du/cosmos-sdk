@@ -1,9 +1,7 @@
 package snapshots_test
 
 import (
-	"bufio"
 	"bytes"
-	"compress/zlib"
 	"crypto/sha256"
 	"errors"
 	"io"
@@ -11,14 +9,11 @@ import (
 	"testing"
 	"time"
 
-	protoio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/require"
+	db "github.com/tendermint/tm-db"
 
-	"github.com/cosmos/cosmos-sdk/db/memdb"
 	"github.com/cosmos/cosmos-sdk/snapshots"
 	"github.com/cosmos/cosmos-sdk/snapshots/types"
-	snapshottypes "github.com/cosmos/cosmos-sdk/snapshots/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
 
 func checksums(slice [][]byte) [][]byte {
@@ -61,85 +56,45 @@ func readChunks(chunks <-chan io.ReadCloser) [][]byte {
 	return bodies
 }
 
-// snapshotItems serialize a array of bytes as SnapshotItem_ExtensionPayload, and return the chunks.
-func snapshotItems(items [][]byte) [][]byte {
-	// copy the same parameters from the code
-	snapshotChunkSize := uint64(10e6)
-	snapshotBufferSize := int(snapshotChunkSize)
-
-	ch := make(chan io.ReadCloser)
-	go func() {
-		chunkWriter := snapshots.NewChunkWriter(ch, snapshotChunkSize)
-		bufWriter := bufio.NewWriterSize(chunkWriter, snapshotBufferSize)
-		zWriter, _ := zlib.NewWriterLevel(bufWriter, 7)
-		protoWriter := protoio.NewDelimitedWriter(zWriter)
-		for _, item := range items {
-			types.WriteExtensionItem(protoWriter, item)
-		}
-		protoWriter.Close()
-		zWriter.Close()
-		bufWriter.Flush()
-		chunkWriter.Close()
-	}()
-
-	var chunks [][]byte
-	for chunkBody := range ch {
-		chunk, err := io.ReadAll(chunkBody)
-		if err != nil {
-			panic(err)
-		}
-		chunks = append(chunks, chunk)
-	}
-	return chunks
-}
-
 type mockSnapshotter struct {
-	items [][]byte
+	chunks [][]byte
 }
 
 func (m *mockSnapshotter) Restore(
-	height uint64, format uint32, protoReader protoio.Reader,
-) (snapshottypes.SnapshotItem, error) {
+	height uint64, format uint32, chunks <-chan io.ReadCloser, ready chan<- struct{},
+) error {
 	if format == 0 {
-		return snapshottypes.SnapshotItem{}, types.ErrUnknownFormat
+		return types.ErrUnknownFormat
 	}
-	if m.items != nil {
-		return snapshottypes.SnapshotItem{}, errors.New("already has contents")
+	if m.chunks != nil {
+		return errors.New("already has contents")
 	}
-
-	m.items = [][]byte{}
-	for {
-		item := &snapshottypes.SnapshotItem{}
-		err := protoReader.ReadMsg(item)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return snapshottypes.SnapshotItem{}, sdkerrors.Wrap(err, "invalid protobuf message")
-		}
-		payload := item.GetExtensionPayload()
-		if payload == nil {
-			return snapshottypes.SnapshotItem{}, sdkerrors.Wrap(err, "invalid protobuf message")
-		}
-		m.items = append(m.items, payload.Payload)
+	if ready != nil {
+		close(ready)
 	}
 
-	return snapshottypes.SnapshotItem{}, nil
-}
-
-func (m *mockSnapshotter) Snapshot(height uint64, protoWriter protoio.Writer) error {
-	for _, item := range m.items {
-		if err := types.WriteExtensionItem(protoWriter, item); err != nil {
+	m.chunks = [][]byte{}
+	for reader := range chunks {
+		chunk, err := io.ReadAll(reader)
+		if err != nil {
 			return err
 		}
+		m.chunks = append(m.chunks, chunk)
 	}
+
 	return nil
 }
 
-func (m *mockSnapshotter) SnapshotFormat() uint32 {
-	return 1
-}
-func (m *mockSnapshotter) SupportedFormats() []uint32 {
-	return []uint32{1}
+func (m *mockSnapshotter) Snapshot(height uint64, format uint32) (<-chan io.ReadCloser, error) {
+	if format == 0 {
+		return nil, types.ErrUnknownFormat
+	}
+	ch := make(chan io.ReadCloser, len(m.chunks))
+	for _, chunk := range m.chunks {
+		ch <- io.NopCloser(bytes.NewReader(chunk))
+	}
+	close(ch)
+	return ch, nil
 }
 
 // setupBusyManager creates a manager with an empty store that is busy creating a snapshot at height 1.
@@ -152,10 +107,10 @@ func setupBusyManager(t *testing.T) *snapshots.Manager {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(tempdir) })
 
-	store, err := snapshots.NewStore(memdb.NewDB(), tempdir)
+	store, err := snapshots.NewStore(db.NewMemDB(), tempdir)
 	require.NoError(t, err)
 	hung := newHungSnapshotter()
-	mgr := snapshots.NewManager(store, hung, nil)
+	mgr := snapshots.NewManager(store, hung)
 
 	go func() {
 		_, err := mgr.Create(1)
@@ -182,13 +137,15 @@ func (m *hungSnapshotter) Close() {
 	close(m.ch)
 }
 
-func (m *hungSnapshotter) Snapshot(height uint64, protoWriter protoio.Writer) error {
+func (m *hungSnapshotter) Snapshot(height uint64, format uint32) (<-chan io.ReadCloser, error) {
 	<-m.ch
-	return nil
+	ch := make(chan io.ReadCloser, 1)
+	ch <- io.NopCloser(bytes.NewReader([]byte{}))
+	return ch, nil
 }
 
 func (m *hungSnapshotter) Restore(
-	height uint64, format uint32, protoReader protoio.Reader,
-) (snapshottypes.SnapshotItem, error) {
+	height uint64, format uint32, chunks <-chan io.ReadCloser, ready chan<- struct{},
+) error {
 	panic("not implemented")
 }

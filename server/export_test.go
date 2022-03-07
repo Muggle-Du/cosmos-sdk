@@ -17,11 +17,10 @@ import (
 	"github.com/tendermint/tendermint/libs/log"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	tmtypes "github.com/tendermint/tendermint/types"
+	dbm "github.com/tendermint/tm-db"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	dbm "github.com/cosmos/cosmos-sdk/db"
-	"github.com/cosmos/cosmos-sdk/db/memdb"
 	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/cosmos/cosmos-sdk/server/types"
 	"github.com/cosmos/cosmos-sdk/simapp"
@@ -106,7 +105,7 @@ func TestExportCmd_Height(t *testing.T) {
 			cmd.SetOut(output)
 			args := append(tc.flags, fmt.Sprintf("--%s=%s", flags.FlagHome, tempDir))
 			cmd.SetArgs(args)
-			require.NoError(t, cmd.ExecuteContext(ctx), tc.name)
+			require.NoError(t, cmd.ExecuteContext(ctx))
 
 			var exportedGenDoc tmtypes.GenesisDoc
 			err := tmjson.Unmarshal(output.Bytes(), &exportedGenDoc)
@@ -128,7 +127,7 @@ func setupApp(t *testing.T, tempDir string) (*simapp.SimApp, context.Context, *t
 	}
 
 	logger, _ := log.NewDefaultLogger("plain", "info", false)
-	db := memdb.NewDB()
+	db := dbm.NewMemDB()
 	encCfg := simapp.MakeTestEncodingConfig()
 	app := simapp.NewSimApp(logger, db, nil, true, map[int64]bool{}, tempDir, 0, encCfg, simapp.EmptyAppOptions{})
 
@@ -156,13 +155,21 @@ func setupApp(t *testing.T, tempDir string) (*simapp.SimApp, context.Context, *t
 	app.Commit()
 
 	cmd := server.ExportCmd(
-		func(_ log.Logger, _ dbm.DBConnection, _ io.Writer, height int64, forZeroHeight bool, jailAllowedAddrs []string, appOptons types.AppOptions) (types.ExportedApp, error) {
-			require.NoError(t, app.CloseStore())
+		func(_ log.Logger, _ dbm.DB, _ io.Writer, height int64, forZeroHeight bool, jailAllowedAddrs []string, appOptons types.AppOptions) (types.ExportedApp, error) {
 			encCfg := simapp.MakeTestEncodingConfig()
-			simApp := simapp.NewSimApp(logger, db, nil, true, map[int64]bool{}, "", 0, encCfg, appOptons)
-			require.NoError(t, simApp.Init())
 
-			return simApp.ExportAppStateAndValidatorsAt(forZeroHeight, jailAllowedAddrs, height)
+			var simApp *simapp.SimApp
+			if height != -1 {
+				simApp = simapp.NewSimApp(logger, db, nil, false, map[int64]bool{}, "", 0, encCfg, appOptons)
+
+				if err := simApp.LoadHeight(height); err != nil {
+					return types.ExportedApp{}, err
+				}
+			} else {
+				simApp = simapp.NewSimApp(logger, db, nil, true, map[int64]bool{}, "", 0, encCfg, appOptons)
+			}
+
+			return simApp.ExportAppStateAndValidators(forZeroHeight, jailAllowedAddrs)
 		}, tempDir)
 
 	ctx := context.Background()

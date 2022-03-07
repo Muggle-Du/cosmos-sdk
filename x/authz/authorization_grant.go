@@ -43,15 +43,15 @@ func (g Grant) UnpackInterfaces(unpacker cdctypes.AnyUnpacker) error {
 }
 
 // GetAuthorization returns the cached value from the Grant.Authorization if present.
-func (g Grant) GetAuthorization() (Authorization, error) {
+func (g Grant) GetAuthorization() Authorization {
 	if g.Authorization == nil {
-		return nil, sdkerrors.Wrap(sdkerrors.ErrInvalidType, "authorization is nil")
+		return nil
 	}
 	a, ok := g.Authorization.GetCachedValue().(Authorization)
 	if !ok {
-		return nil, sdkerrors.ErrInvalidType.Wrapf("expected %T, got %T", (Authorization)(nil), g.Authorization.GetCachedValue())
+		return nil
 	}
-	return a, nil
+	return a
 }
 
 func (g Grant) ValidateBasic() error {

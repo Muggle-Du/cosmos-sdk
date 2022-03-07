@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/gogo/protobuf/proto"
+	db "github.com/tendermint/tm-db"
 
-	dbm "github.com/cosmos/cosmos-sdk/db"
 	"github.com/cosmos/cosmos-sdk/snapshots/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 )
@@ -24,7 +24,7 @@ const (
 
 // Store is a snapshot store, containing snapshot metadata and binary chunks.
 type Store struct {
-	db  dbm.DBConnection
+	db  db.DB
 	dir string
 
 	mtx    sync.Mutex
@@ -32,7 +32,7 @@ type Store struct {
 }
 
 // NewStore creates a new snapshot store.
-func NewStore(db dbm.DBConnection, dir string) (*Store, error) {
+func NewStore(db db.DB, dir string) (*Store, error) {
 	if dir == "" {
 		return nil, sdkerrors.Wrap(sdkerrors.ErrLogic, "snapshot directory not given")
 	}
@@ -57,16 +57,9 @@ func (s *Store) Delete(height uint64, format uint32) error {
 		return sdkerrors.Wrapf(sdkerrors.ErrConflict,
 			"snapshot for height %v format %v is currently being saved", height, format)
 	}
-	dbw := s.db.Writer()
-	defer dbw.Discard()
-	err := dbw.Delete(encodeKey(height, format))
+	err := s.db.DeleteSync(encodeKey(height, format))
 	if err != nil {
 		return sdkerrors.Wrapf(err, "failed to delete snapshot for height %v format %v",
-			height, format)
-	}
-	err = dbw.Commit()
-	if err != nil {
-		return sdkerrors.Wrapf(err, "failed to commit snapshot deletion for height %v format %v",
 			height, format)
 	}
 	err = os.RemoveAll(s.pathSnapshot(height, format))
@@ -76,9 +69,7 @@ func (s *Store) Delete(height uint64, format uint32) error {
 
 // Get fetches snapshot info from the database.
 func (s *Store) Get(height uint64, format uint32) (*types.Snapshot, error) {
-	dbr := s.db.Reader()
-	defer dbr.Discard()
-	bytes, err := dbr.Get(encodeKey(height, format))
+	bytes, err := s.db.Get(encodeKey(height, format))
 	if err != nil {
 		return nil, sdkerrors.Wrapf(err, "failed to fetch snapshot metadata for height %v format %v",
 			height, format)
@@ -100,16 +91,14 @@ func (s *Store) Get(height uint64, format uint32) (*types.Snapshot, error) {
 
 // Get fetches the latest snapshot from the database, if any.
 func (s *Store) GetLatest() (*types.Snapshot, error) {
-	dbr := s.db.Reader()
-	defer dbr.Discard()
-	iter, err := dbr.ReverseIterator(encodeKey(0, 0), encodeKey(uint64(math.MaxUint64), math.MaxUint32))
+	iter, err := s.db.ReverseIterator(encodeKey(0, 0), encodeKey(uint64(math.MaxUint64), math.MaxUint32))
 	if err != nil {
 		return nil, sdkerrors.Wrap(err, "failed to find latest snapshot")
 	}
 	defer iter.Close()
 
 	var snapshot *types.Snapshot
-	if iter.Next() {
+	if iter.Valid() {
 		snapshot = &types.Snapshot{}
 		err := proto.Unmarshal(iter.Value(), snapshot)
 		if err != nil {
@@ -122,16 +111,14 @@ func (s *Store) GetLatest() (*types.Snapshot, error) {
 
 // List lists snapshots, in reverse order (newest first).
 func (s *Store) List() ([]*types.Snapshot, error) {
-	dbr := s.db.Reader()
-	defer dbr.Discard()
-	iter, err := dbr.ReverseIterator(encodeKey(0, 0), encodeKey(uint64(math.MaxUint64), math.MaxUint32))
+	iter, err := s.db.ReverseIterator(encodeKey(0, 0), encodeKey(uint64(math.MaxUint64), math.MaxUint32))
 	if err != nil {
 		return nil, sdkerrors.Wrap(err, "failed to list snapshots")
 	}
 	defer iter.Close()
 
 	snapshots := make([]*types.Snapshot, 0)
-	for iter.Next() {
+	for ; iter.Valid(); iter.Next() {
 		snapshot := &types.Snapshot{}
 		err := proto.Unmarshal(iter.Value(), snapshot)
 		if err != nil {
@@ -194,9 +181,7 @@ func (s *Store) loadChunkFile(height uint64, format uint32, chunk uint32) (io.Re
 
 // Prune removes old snapshots. The given number of most recent heights (regardless of format) are retained.
 func (s *Store) Prune(retain uint32) (uint64, error) {
-	dbr := s.db.Reader()
-	defer dbr.Discard()
-	iter, err := dbr.ReverseIterator(encodeKey(0, 0), encodeKey(uint64(math.MaxUint64), math.MaxUint32))
+	iter, err := s.db.ReverseIterator(encodeKey(0, 0), encodeKey(uint64(math.MaxUint64), math.MaxUint32))
 	if err != nil {
 		return 0, sdkerrors.Wrap(err, "failed to prune snapshots")
 	}
@@ -205,7 +190,7 @@ func (s *Store) Prune(retain uint32) (uint64, error) {
 	pruned := uint64(0)
 	prunedHeights := make(map[uint64]bool)
 	skip := make(map[uint64]bool)
-	for iter.Next() {
+	for ; iter.Valid(); iter.Next() {
 		height, format, err := decodeKey(iter.Key())
 		if err != nil {
 			return 0, sdkerrors.Wrap(err, "failed to prune snapshots")
@@ -257,9 +242,7 @@ func (s *Store) Save(
 		s.mtx.Unlock()
 	}()
 
-	dbr := s.db.Reader()
-	defer dbr.Discard()
-	exists, err := dbr.Has(encodeKey(height, format))
+	exists, err := s.db.Has(encodeKey(height, format))
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +250,6 @@ func (s *Store) Save(
 		return nil, sdkerrors.Wrapf(sdkerrors.ErrConflict,
 			"snapshot already exists for height %v format %v", height, format)
 	}
-	dbr.Discard()
 
 	snapshot := &types.Snapshot{
 		Height: height,
@@ -317,13 +299,7 @@ func (s *Store) saveSnapshot(snapshot *types.Snapshot) error {
 	if err != nil {
 		return sdkerrors.Wrap(err, "failed to encode snapshot metadata")
 	}
-	dbw := s.db.Writer()
-	defer dbw.Discard()
-	err = dbw.Set(encodeKey(snapshot.Height, snapshot.Format), value)
-	if err != nil {
-		return sdkerrors.Wrap(err, "failed to store snapshot")
-	}
-	err = dbw.Commit()
+	err = s.db.SetSync(encodeKey(snapshot.Height, snapshot.Format), value)
 	return sdkerrors.Wrap(err, "failed to store snapshot")
 }
 

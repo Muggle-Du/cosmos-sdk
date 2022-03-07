@@ -4,7 +4,6 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 
-	"github.com/cosmos/cosmos-sdk/store/v2/multi"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/types/tx"
@@ -90,14 +89,5 @@ func (app *BaseApp) NewContext(isCheckTx bool, header tmproto.Header) sdk.Contex
 }
 
 func (app *BaseApp) NewUncachedContext(isCheckTx bool, header tmproto.Header) sdk.Context {
-	return sdk.NewContext(multi.CommitAsCacheStore(app.store), header, isCheckTx, app.logger)
-}
-
-// NewContextAt creates a context using a (read-only) store at a given block height.
-func (app *BaseApp) NewContextAt(isCheckTx bool, header tmproto.Header, height int64) (sdk.Context, error) {
-	view, err := app.store.GetVersion(height)
-	if err != nil {
-		return sdk.Context{}, err
-	}
-	return sdk.NewContext(view.CacheWrap(), header, isCheckTx, app.logger), nil
+	return sdk.NewContext(app.cms, header, isCheckTx, app.logger)
 }

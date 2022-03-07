@@ -11,8 +11,8 @@ type state struct {
 
 // CacheMultiStore calls and returns a CacheMultiStore on the state's underling
 // CacheMultiStore.
-func (st *state) CacheWrap() sdk.CacheMultiStore {
-	return st.ms.CacheWrap()
+func (st *state) CacheMultiStore() sdk.CacheMultiStore {
+	return st.ms.CacheMultiStore()
 }
 
 // Context returns the Context of the state.

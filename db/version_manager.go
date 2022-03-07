@@ -55,6 +55,7 @@ func (vm *VersionManager) Save(target uint64) (uint64, error) {
 	if _, has := vm.versions[target]; has {
 		return 0, fmt.Errorf("version exists: %v", target)
 	}
+
 	vm.versions[target] = struct{}{}
 	vm.last = target
 	if len(vm.versions) == 1 {

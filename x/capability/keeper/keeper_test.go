@@ -279,7 +279,7 @@ func (suite KeeperTestSuite) TestRevertCapability() {
 
 	ms := suite.ctx.MultiStore()
 
-	msCache := ms.CacheWrap()
+	msCache := ms.CacheMultiStore()
 	cacheCtx := suite.ctx.WithMultiStore(msCache)
 
 	capName := "revert"

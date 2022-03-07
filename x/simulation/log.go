@@ -63,7 +63,7 @@ func createLogFile() *os.File {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Writing logs to %s\n", filePath)
+	fmt.Printf("Logs to writing to %s\n", filePath)
 
 	return f
 }
