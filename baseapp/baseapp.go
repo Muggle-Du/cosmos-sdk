@@ -596,6 +596,7 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte) (gInfo sdk.GasInfo, re
 
 	ctx := app.getContextForTx(mode, txBytes)
 	ms := ctx.MultiStore()
+	fmt.Printf("start to run tx, gas meter value: %d\n", ctx.GasMeter().GasConsumed())
 
 	// only run the tx if there is block gas remaining
 	if mode == runTxModeDeliver && ctx.BlockGasMeter().IsOutOfGas() {
@@ -702,6 +703,8 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte) (gInfo sdk.GasInfo, re
 			result.Events = append(anteEvents, result.Events...)
 		}
 	}
+
+	fmt.Printf("finish running tx, gas meter value: %d\n", ctx.GasMeter().GasConsumed())
 
 	return gInfo, result, anteEvents, err
 }
