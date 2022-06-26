@@ -643,6 +643,7 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte) (gInfo sdk.GasInfo, re
 		return sdk.GasInfo{}, nil, nil, err
 	}
 
+	fmt.Printf("before anteHandler, gas meter value: %d\n", ctx.GasMeter().GasConsumed())
 	if app.anteHandler != nil {
 		var (
 			anteCtx sdk.Context
@@ -682,6 +683,7 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte) (gInfo sdk.GasInfo, re
 		msCache.Write()
 		anteEvents = events.ToABCIEvents()
 	}
+	fmt.Printf("after runMsgs, gas meter value: %d\n", ctx.GasMeter().GasConsumed())
 
 	// Create a new Context based off of the existing Context with a MultiStore branch
 	// in case message processing fails. At this point, the MultiStore
