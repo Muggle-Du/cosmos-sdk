@@ -1,6 +1,8 @@
 package baseapp
 
 import (
+	"fmt"
+
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -31,6 +33,7 @@ func (app *BaseApp) Deliver(txEncoder sdk.TxEncoder, tx sdk.Tx) (sdk.GasInfo, *s
 		return sdk.GasInfo{}, nil, sdkerrors.Wrapf(sdkerrors.ErrInvalidRequest, "%s", err)
 	}
 	gasInfo, result, _, err := app.runTx(runTxModeDeliver, bz)
+	fmt.Printf("tx execution: gasWanted %d, gasUsed %d\n", gasInfo.GasWanted, gasInfo.GasUsed)
 	return gasInfo, result, err
 }
 
