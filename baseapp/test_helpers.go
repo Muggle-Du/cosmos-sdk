@@ -33,6 +33,9 @@ func (app *BaseApp) Deliver(txEncoder sdk.TxEncoder, tx sdk.Tx) (sdk.GasInfo, *s
 		return sdk.GasInfo{}, nil, sdkerrors.Wrapf(sdkerrors.ErrInvalidRequest, "%s", err)
 	}
 	gasInfo, result, _, err := app.runTx(runTxModeDeliver, bz)
+	for _, msg := range tx.GetMsgs() {
+		fmt.Printf("tx: %v, msg: %v\n", tx, msg)
+	}
 	fmt.Printf("tx execution: gasWanted %d, gasUsed %d\n", gasInfo.GasWanted, gasInfo.GasUsed)
 	return gasInfo, result, err
 }
