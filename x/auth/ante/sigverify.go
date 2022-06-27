@@ -181,10 +181,12 @@ func (sgcd SigGasConsumeDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simula
 			Sequence: sig.Sequence,
 		}
 
+		fmt.Printf("SigGasConsumeDecorator gas meter value before consume: %d\n", ctx.GasMeter().GasConsumed())
 		err = sgcd.sigGasConsumer(ctx.GasMeter(), sig, params)
 		if err != nil {
 			return ctx, err
 		}
+		fmt.Printf("SigGasConsumeDecorator gas meter value after consume: %d\n", ctx.GasMeter().GasConsumed())
 	}
 
 	return next(ctx, tx, simulate)
