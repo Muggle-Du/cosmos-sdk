@@ -95,6 +95,7 @@ func (cgts ConsumeTxSizeGasDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, sim
 	params := cgts.ak.GetParams(ctx)
 
 	fmt.Printf("ConsumeTxSizeGasDecorator gas meter value before consume: %d\n", ctx.GasMeter().GasConsumed())
+	fmt.Printf("ConsumeTxSizeGasDecorator TxSizeCostPerByte: %d, tx bytes length: %d\n", params.TxSizeCostPerByte, len(ctx.TxBytes()))
 	ctx.GasMeter().ConsumeGas(params.TxSizeCostPerByte*sdk.Gas(len(ctx.TxBytes())), "txSize")
 	fmt.Printf("ConsumeTxSizeGasDecorator gas meter value after consume: %d\n", ctx.GasMeter().GasConsumed())
 
