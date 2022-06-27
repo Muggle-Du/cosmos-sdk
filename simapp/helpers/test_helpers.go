@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -25,7 +26,10 @@ func GenTx(gen client.TxConfig, msgs []sdk.Msg, feeAmt sdk.Coins, gas uint64, ch
 	// create a random length memo
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	memo := simulation.RandStringOfLength(r, simulation.RandIntBetween(r, 0, 100))
+	length := simulation.RandIntBetween(r, 0, 100)
+	memo := simulation.RandStringOfLength(r, length)
+	fmt.Printf("GenTx expected length: %d, memo length: %d\n", length, len(memo))
+	// memo := simulation.RandStringOfLength(r, simulation.RandIntBetween(r, 0, 100))
 
 	signMode := gen.SignModeHandler().DefaultMode()
 
