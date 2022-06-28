@@ -3,7 +3,9 @@ package genutil_test
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
@@ -233,7 +235,9 @@ func (suite *GenTxTestSuite) TestDeliverGenTxs() {
 				_ = suite.setAccountBalance(addr2, 1)
 
 				msg := banktypes.NewMsgSend(addr1, addr2, sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)})
+				r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
 				tx, err := helpers.GenTx(
+					r,
 					suite.encodingConfig.TxConfig,
 					[]sdk.Msg{msg},
 					sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 10)},
