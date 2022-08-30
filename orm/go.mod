@@ -8,7 +8,7 @@ require (
 	github.com/cosmos/cosmos-sdk/errors v1.0.0-beta.2
 	google.golang.org/protobuf v1.27.1
 	gotest.tools/v3 v3.1.0
-	pgregory.net/rapid v0.4.7
+	pgregory.net/rapid v0.5.2
 )
 
 require (
