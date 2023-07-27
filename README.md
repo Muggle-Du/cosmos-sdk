@@ -1,81 +1,153 @@
-<!--
-parent:
-  order: false
--->
+## Info
+This branch is used for testing consensus of cometbft under the circumstances of special task
 
-<div align="center">
-  <h1> Cosmos SDK </h1>
-</div>
+## Task
 
-![banner](docs/cosmos-sdk-image.jpg)
+Fork Cosmos SDK, modify protocol logic and launch a local network with 10 nodes.
+1. Fork cosmos sdk: https://github.com/cosmos/cosmos-sdk 2. Modify the related code or components to:
+a. Add a new field in the block data structure which can record a specific block number.
+b. Modify the block proposal and verification logic so:
+i. The leader, when proposing a new block, will call a Ethereum rpc server and get the latest eth block number and add that number in the new field mentioned above.
+ii. The validators will do the same rpc call to verify that the latest ethereum block number is greater or equal to the number in the proposed block. If true, sign the block, otherwise, reject the block.
+3. Launch the modified protocol network with 10 nodes and test following scenarios:
+a. All nodes talk to the same rpc server and they can reach consensus succesfully.
+b. 5 nodes talk to normal rpc server while the rest talk to a bad rpc server which report block number that’s way smaller. This will cause the consensus failure since only 50% of the nodes agree with each other.
 
-<div align="center">
-  <a href="https://github.com/cosmos/cosmos-sdk/blob/main/LICENSE">
-    <img alt="License: Apache-2.0" src="https://img.shields.io/github/license/cosmos/cosmos-sdk.svg" />
-  </a>
-  <a href="https://pkg.go.dev/github.com/cosmos/cosmos-sdk?tab=doc">
-    <img alt="GoDoc" src="https://pkg.go.dev/github.com/cosmos/cosmos-sdk?status.svg" />
-  </a>
-  <a href="https://goreportcard.com/report/github.com/cosmos/cosmos-sdk">
-    <img alt="Go report card" src="https://goreportcard.com/badge/github.com/cosmos/cosmos-sdk" />
-  </a>
-  <a href="https://codecov.io/gh/cosmos/cosmos-sdk">
-    <img alt="Code Coverage" src="https://codecov.io/gh/cosmos/cosmos-sdk/branch/main/graph/badge.svg" />
-  </a>
-</div>
-<div align="center">
-  <a href="https://github.com/cosmos/cosmos-sdk">
-    <img alt="Lines Of Code" src="https://tokei.rs/b1/github/cosmos/cosmos-sdk" />
-  </a>
-  <a href="https://discord.gg/AzefAFd">
-    <img alt="Discord" src="https://img.shields.io/discord/669268347736686612.svg" />
-  </a>
-  <a href="https://sourcegraph.com/github.com/cosmos/cosmos-sdk?badge">
-    <img alt="Imported by" src="https://sourcegraph.com/github.com/cosmos/cosmos-sdk/-/badge.svg" />
-  </a>
-    <img alt="Sims" src="https://github.com/cosmos/cosmos-sdk/workflows/Sims/badge.svg" />
-    <img alt="Lint Satus" src="https://github.com/cosmos/cosmos-sdk/workflows/Lint/badge.svg" />
-</div>
+## Solution
 
-The Cosmos SDK is a framework for building blockchain applications. [Tendermint Core (BFT Consensus)](https://github.com/tendermint/tendermint) and the Cosmos SDK are written in the Golang programming language. Cosmos SDK is used to build [Gaia](https://github.com/cosmos/gaia), the first implementation of the Cosmos Hub.
+### Config
+`devnet.yaml`:
+```yaml
+exocore:
+  cmd: good-simd
+  validators:
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: reduce topple fish ordinary nut rubber stomach kite tooth entire warfare immense
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: oyster sense buffalo awake narrow run glue devote wedding cheap split dove
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: spoil citizen dignity web flush cabbage east dune culture cliff twenty key
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: decrease saddle opinion fossil armed intact luggage donor chalk genre monitor crystal
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: distance certain bitter wrap town benefit poet remember punch practice rocket primary
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: actor sleep dinosaur fork tide infant quote unique razor vintage denial clutch
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: matrix acid rescue warm crawl grocery tooth material marine nice task three
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: era mean fold install violin dust once language gadget sense program deer
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: split brick brain box strong main bullet multiply oyster south copper tiger
+    - coins: 1000000000000000000stake
+      staked: 1000000000000000000stake
+      mnemonic: omit voyage cactus behave riot various sphere dwarf deposit survey inmate remind
+  accounts:
+    - name: community
+      coins: 10000000000000000000000stake
+      mnemonic: tooth flower auto verb furnace junior retire boy life upon salt light
+    - name: signer1
+      coins: 20000000000000000000000stake
+      mnemonic: crop capable senior worry now that horse hover vehicle silk mutual govern
+    - name: signer2
+      coins: 30000000000000000000000stake
+      mnemonic: rare fold jump soccer long bonus churn drift real metal exotic copy
 
-**WARNING**: The Cosmos SDK has mostly stabilized, but we are still making some
-breaking changes.
+  genesis:  # patch genesis states
+    consensus_params:
+      block:
+        max_bytes: "1048576"
+        max_gas: "81500000"
+    app_state:
+      staking:
+        params:
+          unbonding_time: "10s"
+```
 
-**Note**: Requires [Go 1.19+](https://go.dev/dl)
+### Procedures
 
-## Quick Start
+1. install `pystarport`, which is our scaffold used to start the local testnet with 10 nodes:
+```bash
+python3 -m pip install pystarport
+```
 
-To learn how the Cosmos SDK works from a high-level perspective, see the Cosmos SDK [High-Level Intro](./docs/intro/overview.md).
+2. pull forked upstream cometbft repo, which has changed the `Block` data struct and some consensus logics:
+```bash
+git pull https://github.com/adu-web3/cometbft.git
+```
 
-If you want to get started quickly and learn how to build on top of Cosmos SDK, visit [Cosmos SDK Tutorials](https://tutorials.cosmos.network). You can also fork the tutorial's repository to get started building your own Cosmos SDK application.
+3. checkout to `exocore-test` branch:
+```bash
+git checkout exocore-test
+```
 
-For more information, see the [Cosmos SDK Documentation](./docs/).
+4. pull this repo and checkout to `exocore-test` branch:
+```bash
+git pull https://github.com/adu-web3/cosmos-sdk.git
+git checkout exocore-test
+```
 
-## Contributing
+5. replace `tendermint` dependency path with your local `cometbft` repo path in `go.mod` file of your locak cosmo-sdk repo:
+```go
+replace (
+	// use cosmos fork of keyring
+	github.com/99designs/keyring => github.com/cosmos/keyring v1.2.0
+	....
+	// use cometbft
+	github.com/tendermint/tendermint => ${your-local-cometbft-repo-path}
+)
+```
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for details how to contribute and participate in our [dev calls](./CONTRIBUTING.md#teams-dev-calls).
-If you want to follow the updates or learn more about the latest design then join our [Discord](https://discord.com/invite/cosmosnetwork).
+6. compile and install misbehaved `simd`:
+```bash
+cd cosmos-sdk
+make install
+mv ~/go/bin/simd ~/go/bin/bad-simd
+```
 
-## Tools and Frameworks
+7. checkout `cometbft` repo to `exocore-test-good` branch, which listens to normal ethereum oracle rpc and respond correctly:
+```bash
+cd cometbft
+git checkout exocore-test-good
+```
 
-The Cosmos ecosystem is vast. We will only make a few notable mentions here.
+8. compile and install well-behaved `simd`:
+```bash
+cd cosmos-sdk
+make install
+mv ~/go/bin/simd ~/go/bin/good-simd
+```
 
-+ [Tools](https://v1.cosmos.network/tools): notable frameworks and modules.
-+ [CosmJS](https://github.com/cosmos/cosmjs): the Swiss Army knife to power JavaScript based client solutions.
+9. start the network with 10 well-behaved nodes:
+```bash
+pystarport init --config tmp/devnet.yaml
+pystarport start --data data > tmp/log.txt
+```
 
-### Cosmos Hub Mainnet
+10. start the network with 5 well-behaved nodes and 5 misbehaved nodes:
+```bash
+pystarport init --config tmp/devnet.yaml
+```
+then edit `tasks.ini` in `data/exocore/` to specify the command for each node to have 5
+nodes running `good-simd` and the rest running `bad-simd`
+```bash
+pystarport start --data data > tmp/log.txt
+```
 
-The Cosmos Hub application, `gaia`, has moved to its own [cosmos/gaia repository](https://github.com/cosmos/gaia). Go there to join the Cosmos Hub mainnet and more.
+### Doubts and follows
 
-### Inter-Blockchain Communication (IBC)
+If we run a local testnet with with 5 well-behaved nodes and 5 misbehaved nodes, the expected consensus failure
+does not halt the network, instead the network would continue infinite rounds of prevote until another proposal 
+was created and successfully validated at the same block height.
 
-The IBC module for the Cosmos SDK has moved to its own [cosmos/ibc-go repository](https://github.com/cosmos/ibc-go). Go there to build and integrate with the IBC module.
-
-### Ignite CLI
-
-Ignite CLI is the all-in-one platform to build, launch, and maintain any crypto application on a sovereign and secured blockchain. If you are building a new app or a new module, use [Ignite CLI](https://github.com/ignite-hq/cli) to get started and speed up development.
-
-## Disambiguation
-
-This Cosmos SDK project is not related to the [React-Cosmos](https://github.com/react-cosmos/react-cosmos) project (yet). Many thanks to Evan Coury and Ovidiu (@skidding) for this Github organization name. As per our agreement, this disambiguation notice will stay here.
+About this problem, I have open an issue to discuss and follow the future solutions:
+https://github.com/cometbft/cometbft/issues/1172
